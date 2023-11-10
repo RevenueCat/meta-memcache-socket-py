@@ -1,6 +1,8 @@
 mod constants;
 mod impl_build_cmd;
+mod impl_build_cmd_tests;
 mod impl_parse_header;
+mod impl_parse_header_tests;
 mod request_flags;
 mod response_flags;
 pub use constants::*;
@@ -28,7 +30,7 @@ pub fn parse_header(
     buffer: PyBuffer<u8>,
     start: usize,
     end: usize,
-) -> PyResult<Option<(usize, Option<i32>, Option<u32>, Option<ResponseFlags>)>> {
+) -> PyResult<Option<(usize, Option<u8>, Option<u32>, Option<ResponseFlags>)>> {
     if end > buffer.len_bytes() {
         return Err(pyo3::exceptions::PyValueError::new_err(
             "End must be less than buffer length",

@@ -1,9 +1,9 @@
-pub const RESPONSE_VALUE: i32 = 1; // VALUE (VA)
-pub const RESPONSE_SUCCESS: i32 = 2; // SUCCESS (OK or HD)
-pub const RESPONSE_NOT_STORED: i32 = 3; // NOT_STORED (NS)
-pub const RESPONSE_CONFLICT: i32 = 4; // CONFLICT (EX)
-pub const RESPONSE_MISS: i32 = 5; // MISS (EN or NF)
-pub const RESPONSE_NOOP: i32 = 100; // NOOP (MN)
+pub const RESPONSE_VALUE: u8 = 1; // VALUE (VA)
+pub const RESPONSE_SUCCESS: u8 = 2; // SUCCESS (OK or HD)
+pub const RESPONSE_NOT_STORED: u8 = 3; // NOT_STORED (NS)
+pub const RESPONSE_CONFLICT: u8 = 4; // CONFLICT (EX)
+pub const RESPONSE_MISS: u8 = 5; // MISS (EN or NF)
+pub const RESPONSE_NOOP: u8 = 100; // NOOP (MN)
 
 // Set modes:
 // E: "add" command. LRU bump and return NS if item exists. Else add.
