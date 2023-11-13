@@ -1,4 +1,4 @@
-use atoi::FromRadix10;
+use atoi::FromRadix10Checked;
 use pyo3::prelude::*;
 
 #[inline]
@@ -11,6 +11,22 @@ fn find_space_or_end(header: &[u8], start: usize) -> usize {
         n += 1;
     }
     n
+}
+
+#[inline]
+fn get_u32_value(header: &[u8], start: usize) -> (Option<u32>, usize) {
+    match u32::from_radix_10_checked(&header[start..]) {
+        (Some(v), len) if len > 0 => (Some(v), start + len),
+        _ => (None, find_space_or_end(&header, start)),
+    }
+}
+
+#[inline]
+fn get_i32_value(header: &[u8], start: usize) -> (Option<i32>, usize) {
+    match i32::from_radix_10_checked(&header[start..]) {
+        (Some(v), len) if len > 0 => (Some(v), start + len),
+        _ => (None, find_space_or_end(&header, start)),
+    }
 }
 
 #[pyclass]
@@ -125,12 +141,14 @@ impl ResponseFlags {
         if header.len() < size_start + 1 {
             return None;
         }
-        let (size, pos) = u32::from_radix_10(&header[size_start..]);
-        if pos == 0 {
-            return None;
+        // let (size, pos) = u32::from_radix_10_checked(&header[size_start..]);
+        match u32::from_radix_10_checked(&header[size_start..]) {
+            (Some(size), pos) if pos > 0 => {
+                let flags = ResponseFlags::parse_flags(header, size_start + pos);
+                Some((size, flags))
+            }
+            _ => None,
         }
-        let flags = ResponseFlags::parse_flags(header, size_start + pos);
-        Some((size, flags))
     }
 
     #[staticmethod]
@@ -157,61 +175,33 @@ impl ResponseFlags {
                 }
                 b'c' => {
                     // cas_token flag (u32)
-                    let (v, len) = u32::from_radix_10(&header[n..]);
-                    if len > 0 {
-                        cas_token = Some(v);
-                        n += len;
-                    } else {
-                        n = find_space_or_end(&header, n);
-                    }
+                    (cas_token, n) = get_u32_value(&header, n);
                 }
                 b'h' => {
                     // fetched flag (bool) encoded as 1 or 0
-                    match header[n] {
-                        b'1' => {
-                            fetched = Some(true);
-                        }
-                        b'0' => {
-                            fetched = Some(false);
-                        }
-                        _ => {}
-                    }
-                    n += 1;
+                    fetched = match header[n] {
+                        b'1' => Some(true),
+                        b'0' => Some(false),
+                        _ => None,
+                    };
+                    n = find_space_or_end(&header, n + 1);
                 }
                 b'l' => {
                     // last_access flag (u32)
-                    let (v, len) = u32::from_radix_10(&header[n..]);
-                    if len > 0 {
-                        last_access = Some(v);
-                        n += len;
-                    } else {
-                        n = find_space_or_end(&header, n);
-                    }
+                    (last_access, n) = get_u32_value(&header, n);
                 }
                 b't' => {
                     // ttl flag (i32) encoded as -1 (for no ttl) or a positive number
-                    if header[n + 1] == b'-' {
+                    if n < header.len() && header[n] == b'-' {
                         ttl = Some(-1);
-                        n += 2;
+                        n = find_space_or_end(&header, n)
                     } else {
-                        let (v, len) = i32::from_radix_10(&header[n..]);
-                        if len > 0 {
-                            ttl = Some(v);
-                            n += len;
-                        } else {
-                            n = find_space_or_end(&header, n);
-                        }
+                        (ttl, n) = get_i32_value(&header, n);
                     }
                 }
                 b'f' => {
                     // client_flag flag (u32)
-                    let (v, len) = u32::from_radix_10(&header[n..]);
-                    if len > 0 {
-                        client_flag = Some(v);
-                        n += len;
-                    } else {
-                        n = find_space_or_end(&header, n);
-                    }
+                    (client_flag, n) = get_u32_value(&header, n);
                 }
                 b'W' => {
                     // win flag (bool), no value
@@ -227,13 +217,7 @@ impl ResponseFlags {
                 }
                 b's' => {
                     // size flag (u32)
-                    let (v, len) = u32::from_radix_10(&header[n..]);
-                    if len > 0 {
-                        size = Some(v);
-                        n += len;
-                    } else {
-                        n = find_space_or_end(&header, n);
-                    }
+                    (size, n) = get_u32_value(&header, n);
                 }
                 b'O' => {
                     // opaque flag (bytes)

@@ -5,8 +5,6 @@ use crate::RequestFlags;
 const MAX_KEY_LEN: usize = 250;
 const MAX_BIN_KEY_LEN: usize = 187; // 250 * 3 / 4 due to b64 encoding
 
-// type KeyHasher = Blake2b<U18>;
-
 pub fn impl_build_cmd(
     cmd: &[u8],
     key: &[u8],

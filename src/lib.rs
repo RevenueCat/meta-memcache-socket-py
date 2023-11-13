@@ -65,12 +65,96 @@ pub fn build_cmd(
     }
 }
 
+#[pyfunction]
+#[pyo3(
+    signature = (
+        key,
+        request_flags=None,
+    ),
+    text_signature = "(key: bytes, request_flags: Optional[RequestFlags])",
+)]
+pub fn build_meta_get(
+    py: Python,
+    key: &[u8],
+    request_flags: Option<&RequestFlags>,
+) -> PyResult<Py<PyBytes>> {
+    match impl_build_cmd(b"mg", key, None, request_flags, false) {
+        Some(buf) => Ok(PyBytes::new(py, &buf).into()),
+        None => Err(pyo3::exceptions::PyValueError::new_err("Key is too long")),
+    }
+}
+
+#[pyfunction]
+#[pyo3(
+    signature = (
+        key,
+        size,
+        request_flags=None,
+        legacy_size_format=false,
+    ),
+    text_signature = "(key: bytes, size: int, request_flags: Optional[RequestFlags], legacy_size_format: bool = False)",
+)]
+pub fn build_meta_set(
+    py: Python,
+    key: &[u8],
+    size: u32,
+    request_flags: Option<&RequestFlags>,
+    legacy_size_format: bool,
+) -> PyResult<Py<PyBytes>> {
+    match impl_build_cmd(b"ms", key, Some(size), request_flags, legacy_size_format) {
+        Some(buf) => Ok(PyBytes::new(py, &buf).into()),
+        None => Err(pyo3::exceptions::PyValueError::new_err("Key is too long")),
+    }
+}
+
+#[pyfunction]
+#[pyo3(
+    signature = (
+        key,
+        request_flags=None,
+    ),
+    text_signature = "(key: bytes, request_flags: Optional[RequestFlags])",
+)]
+pub fn build_meta_delete(
+    py: Python,
+    key: &[u8],
+    request_flags: Option<&RequestFlags>,
+) -> PyResult<Py<PyBytes>> {
+    match impl_build_cmd(b"md", key, None, request_flags, false) {
+        Some(buf) => Ok(PyBytes::new(py, &buf).into()),
+        None => Err(pyo3::exceptions::PyValueError::new_err("Key is too long")),
+    }
+}
+
+#[pyfunction]
+#[pyo3(
+    signature = (
+        key,
+        request_flags=None,
+    ),
+    text_signature = "(key: bytes, request_flags: Optional[RequestFlags])",
+)]
+pub fn build_meta_arithmetic(
+    py: Python,
+    key: &[u8],
+    request_flags: Option<&RequestFlags>,
+) -> PyResult<Py<PyBytes>> {
+    match impl_build_cmd(b"ma", key, None, request_flags, false) {
+        Some(buf) => Ok(PyBytes::new(py, &buf).into()),
+        None => Err(pyo3::exceptions::PyValueError::new_err("Key is too long")),
+    }
+}
+
 #[pymodule]
 fn meta_socket(_py: Python, module: &PyModule) -> PyResult<()> {
     module.add_class::<ResponseFlags>()?;
     module.add_class::<RequestFlags>()?;
     module.add_function(wrap_pyfunction!(parse_header, module)?)?;
     module.add_function(wrap_pyfunction!(build_cmd, module)?)?;
+    module.add_function(wrap_pyfunction!(build_meta_get, module)?)?;
+    module.add_function(wrap_pyfunction!(build_meta_set, module)?)?;
+    module.add_function(wrap_pyfunction!(build_meta_delete, module)?)?;
+    module.add_function(wrap_pyfunction!(build_meta_arithmetic, module)?)?;
     module.add("RESPONSE_VALUE", RESPONSE_VALUE)?;
     module.add("RESPONSE_SUCCESS", RESPONSE_SUCCESS)?;
     module.add("RESPONSE_NOT_STORED", RESPONSE_NOT_STORED)?;
