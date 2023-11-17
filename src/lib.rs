@@ -146,7 +146,7 @@ pub fn build_meta_arithmetic(
 }
 
 #[pymodule]
-fn meta_socket(_py: Python, module: &PyModule) -> PyResult<()> {
+fn meta_memcache_socket(_py: Python, module: &PyModule) -> PyResult<()> {
     module.add_class::<ResponseFlags>()?;
     module.add_class::<RequestFlags>()?;
     module.add_function(wrap_pyfunction!(parse_header, module)?)?;
