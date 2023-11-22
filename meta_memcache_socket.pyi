@@ -170,5 +170,56 @@ def build_cmd(
     :param cmd: The command to send
     :param key: The key to use
     :param flags: The flags to use
+    :param legacy_size_format: Wether to legacy size syntax from 1.6.6
+    """
+    ...
+
+def build_meta_get(
+    key: bytes,
+    flags: Optional[RequestFlags] = None,
+) -> bytes:
+    """
+    Build a memcache meta-get command
+
+    :param key: The key to use
+    :param flags: The flags to use
+    """
+    ...
+
+def build_meta_delete(
+    key: bytes,
+    flags: Optional[RequestFlags] = None,
+) -> bytes:
+    """
+    Build a memcache meta-get command
+
+    :param key: The key to use
+    :param flags: The flags to use
+    """
+    ...
+
+def build_meta_set(
+    key: bytes,
+    size: Optional[int] = None,
+    flags: Optional[RequestFlags] = None,
+    legacy_size_format: bool = False,
+) -> bytes:
+    """
+    Build a memcache meta-set command
+
+    :param key: The key to use
+    :param flags: The flags to use
+    """
+    ...
+
+def build_meta_arithmetic(
+    key: bytes,
+    flags: Optional[RequestFlags] = None,
+) -> bytes:
+    """
+    Build a memcache meta-arithmetic command
+
+    :param key: The key to use
+    :param flags: The flags to use
     """
     ...
