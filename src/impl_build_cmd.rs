@@ -30,7 +30,7 @@ pub fn impl_build_cmd(
     }
 
     // Build the command
-    let mut buf: Vec<u8> = Vec::new();
+    let mut buf: Vec<u8> = Vec::with_capacity(128);
 
     // Add CMD
     buf.extend_from_slice(cmd);
