@@ -29,7 +29,8 @@ fn get_i32_value(header: &[u8], start: usize) -> (Option<i32>, usize) {
     }
 }
 
-#[pyclass]
+#[pyclass(frozen, eq, skip_from_py_object)]
+#[derive(Clone, PartialEq)]
 pub struct ResponseFlags {
     #[pyo3(get)]
     pub cas_token: Option<u32>,
@@ -101,18 +102,6 @@ impl ResponseFlags {
             size,
             opaque,
         }
-    }
-
-    pub fn __eq__(&self, other: &Self) -> bool {
-        self.cas_token == other.cas_token
-            && self.fetched == other.fetched
-            && self.last_access == other.last_access
-            && self.ttl == other.ttl
-            && self.client_flag == other.client_flag
-            && self.win == other.win
-            && self.stale == other.stale
-            && self.size == other.size
-            && self.opaque == other.opaque
     }
 
     pub fn __str__(&self) -> String {
