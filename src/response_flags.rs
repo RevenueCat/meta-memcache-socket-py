@@ -1,16 +1,13 @@
 use atoi::FromRadix10Checked;
+use memchr::memchr;
 use pyo3::prelude::*;
 
 #[inline]
 fn find_space_or_end(header: &[u8], start: usize) -> usize {
-    let mut n = start;
-    while n < header.len() {
-        if header[n] == b' ' {
-            break;
-        }
-        n += 1;
+    match memchr(b' ', &header[start..]) {
+        Some(pos) => start + pos,
+        None => header.len(),
     }
-    n
 }
 
 #[inline]

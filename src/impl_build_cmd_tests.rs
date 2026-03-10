@@ -27,7 +27,7 @@ mod tests {
             Some(666),                // ma_delta_value,
             Some(777),                // cas_token
             Some(b"opaque".to_vec()), // opaque
-            Some(65 as u8),           // mode
+            Some(b'A'),               // mode (APPEND)
         );
 
         let result = impl_build_cmd(cmd, key, None, Some(&request_flags), false).unwrap();
@@ -139,11 +139,43 @@ mod tests {
     }
 
     #[test]
+    fn test_empty_key_rejected() {
+        assert!(impl_build_cmd(b"mg", b"", None, None, false).is_none());
+    }
+
+    #[test]
+    fn test_key_at_max_length() {
+        // 249 bytes is OK (< 250)
+        let key = &vec![b'X'; 249];
+        assert!(impl_build_cmd(b"mg", key, None, None, false).is_some());
+    }
+
+    #[test]
+    fn test_key_at_exact_max_length() {
+        // 250 bytes is rejected (>= MAX_KEY_LEN)
+        let key = &vec![b'X'; 250];
+        assert!(impl_build_cmd(b"mg", key, None, None, false).is_none());
+    }
+
+    #[test]
+    fn test_binary_key_at_max_length() {
+        // 186 binary bytes is OK (< 187 = MAX_BIN_KEY_LEN)
+        let key = &vec![0x00u8; 186];
+        assert!(impl_build_cmd(b"mg", key, None, None, false).is_some());
+    }
+
+    #[test]
+    fn test_binary_key_at_exact_max_length() {
+        // 187 binary bytes is rejected (>= MAX_BIN_KEY_LEN)
+        let key = &vec![0x00u8; 187];
+        assert!(impl_build_cmd(b"mg", key, None, None, false).is_none());
+    }
+
+    #[test]
     fn test_impl_build_cmd_large_key() {
         let cmd = b"mg";
         let key = &vec![b'X'; 250];
-        let no_result = impl_build_cmd(cmd, key, None, None, false);
-        assert!(no_result.is_none());
+        assert!(impl_build_cmd(cmd, key, None, None, false).is_none());
     }
 
     #[test]
