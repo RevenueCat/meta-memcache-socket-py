@@ -1,28 +1,28 @@
 from typing import Optional, Tuple, Union
 
-RESPONSE_VALUE = 1  # VALUE (VA)
-RESPONSE_SUCCESS = 2  # SUCCESS (OK or HD)
-RESPONSE_NOT_STORED = 3  # NOT_STORED (NS)
-RESPONSE_CONFLICT = 4  # CONFLICT (EX)
-RESPONSE_MISS = 5  # MISS (EN or NF)
-RESPONSE_NOOP = 100  # NOOP (MN)
+RESPONSE_VALUE: int  # 1 - VALUE (VA)
+RESPONSE_SUCCESS: int  # 2 - SUCCESS (OK or HD)
+RESPONSE_NOT_STORED: int  # 3 - NOT_STORED (NS)
+RESPONSE_CONFLICT: int  # 4 - CONFLICT (EX)
+RESPONSE_MISS: int  # 5 - MISS (EN or NF)
+RESPONSE_NOOP: int  # 100 - NOOP (MN)
 
 # Set modes
 # E "add" command. LRU bump and return NS if item exists. Else add.
-SET_MODE_ADD = 69
+SET_MODE_ADD: int  # 69 ('E')
 # A "append" command. If item exists, append the new value to its data.
-SET_MODE_APPEND = 65  # 'A'
+SET_MODE_APPEND: int  # 65 ('A')
 # P "prepend" command. If item exists, prepend the new value to its data.
-SET_MODE_PREPEND = 80  # 'P'
+SET_MODE_PREPEND: int  # 80 ('P')
 # R "replace" command. Set only if item already exists.
-SET_MODE_REPLACE = 82  # 'R'
+SET_MODE_REPLACE: int  # 82 ('R')
 # S "set" command. The default mode, added for completeness.
-SET_MODE_SET = 83  # 'S'
+SET_MODE_SET: int  # 83 ('S')
 # Arithmetic modes
 # + "increment"
-MA_MODE_INC = 43
+MA_MODE_INC: int  # 43 ('+')
 # - "decrement"
-MA_MODE_DEC = 45
+MA_MODE_DEC: int  # 45 ('-')
 
 class RequestFlags:
     """
@@ -31,7 +31,7 @@ class RequestFlags:
     * no_reply: Set to True if the server should not send a response
     * return_client_flag: Set to True if the server should return the client flag
     * return_cas_token: Set to True if the server should return the CAS token
-    * return_value: Set to True if the server should return the value (Default)
+    * return_value: Set to True if the server should return the value
     * return_ttl: Set to True if the server should return the TTL
     * return_size: Set to True if the server should return the size (useful
         if when paired with return_value=False, to get the size of the value)
@@ -73,11 +73,12 @@ class RequestFlags:
     mode: Optional[int]
 
     def __init__(
+        self,
         *,
         no_reply: bool = False,
-        return_client_flag: bool = True,
+        return_client_flag: bool = False,
         return_cas_token: bool = False,
-        return_value=True,
+        return_value: bool = False,
         return_ttl: bool = False,
         return_size: bool = False,
         return_last_access: bool = False,
@@ -97,6 +98,7 @@ class RequestFlags:
     ) -> None: ...
     def copy(self) -> "RequestFlags": ...
     def to_bytes(self) -> bytes: ...
+    def __str__(self) -> str: ...
 
 class ResponseFlags:
     """
@@ -106,7 +108,7 @@ class ResponseFlags:
     * fetched:
         - True if fetched since being set
         - False if not fetched since being set
-        - None if the server di not return this flag info
+        - None if the server did not return this flag info
     * last_access: time in seconds since last access (integer value) or None if not returned
     * ttl: time in seconds until the value expires (integer value) or None if not returned
         - The special value -1 represents if the key will never expire
@@ -116,8 +118,8 @@ class ResponseFlags:
         - False if the client lost the right to repopulate
         - None if the server did not return a win/lose flag
     * stale: True if the value is stale, False otherwise
-    * real_size: integer value or None if not returned
-    * opaque flag: bytes value or None if not returned
+    * size: integer value or None if not returned
+    * opaque: bytes value or None if not returned
     """
 
     cas_token: Optional[int]
@@ -127,21 +129,38 @@ class ResponseFlags:
     client_flag: Optional[int]
     win: Optional[bool]
     stale: bool
-    real_size: Optional[int]
+    size: Optional[int]
     opaque: Optional[bytes]
 
     def __init__(
+        self,
         *,
-        cas_token=None,
-        fetched=None,
-        last_access=None,
-        ttl=None,
-        client_flag=None,
-        win=None,
-        stale=False,
-        size=None,
-        opaque=None,
+        cas_token: Optional[int] = None,
+        fetched: Optional[bool] = None,
+        last_access: Optional[int] = None,
+        ttl: Optional[int] = None,
+        client_flag: Optional[int] = None,
+        win: Optional[bool] = None,
+        stale: bool = False,
+        size: Optional[int] = None,
+        opaque: Optional[bytes] = None,
     ) -> None: ...
+    def __str__(self) -> str: ...
+
+    @staticmethod
+    def from_success_header(header: bytes) -> "ResponseFlags":
+        """Parse response flags from a success (HD) header."""
+        ...
+
+    @staticmethod
+    def from_value_header(header: bytes) -> Optional[Tuple[int, "ResponseFlags"]]:
+        """Parse size and response flags from a value (VA) header."""
+        ...
+
+    @staticmethod
+    def parse_flags(header: bytes, start: int) -> "ResponseFlags":
+        """Parse response flags from a header starting at the given position."""
+        ...
 
 def parse_header(
     buffer: Union[memoryview, bytes, bytearray],
@@ -161,7 +180,7 @@ def build_cmd(
     cmd: bytes,
     key: bytes,
     size: Optional[int] = None,
-    flags: Optional[RequestFlags] = None,
+    request_flags: Optional[RequestFlags] = None,
     legacy_size_format: bool = False,
 ) -> bytes:
     """
@@ -169,57 +188,60 @@ def build_cmd(
 
     :param cmd: The command to send
     :param key: The key to use
-    :param flags: The flags to use
-    :param legacy_size_format: Wether to legacy size syntax from 1.6.6
+    :param size: The size of the value (for set commands)
+    :param request_flags: The flags to use
+    :param legacy_size_format: Whether to use legacy size syntax from 1.6.6
     """
     ...
 
 def build_meta_get(
     key: bytes,
-    flags: Optional[RequestFlags] = None,
+    request_flags: Optional[RequestFlags] = None,
 ) -> bytes:
     """
     Build a memcache meta-get command
 
     :param key: The key to use
-    :param flags: The flags to use
+    :param request_flags: The flags to use
     """
     ...
 
 def build_meta_delete(
     key: bytes,
-    flags: Optional[RequestFlags] = None,
+    request_flags: Optional[RequestFlags] = None,
 ) -> bytes:
     """
-    Build a memcache meta-get command
+    Build a memcache meta-delete command
 
     :param key: The key to use
-    :param flags: The flags to use
+    :param request_flags: The flags to use
     """
     ...
 
 def build_meta_set(
     key: bytes,
-    size: Optional[int] = None,
-    flags: Optional[RequestFlags] = None,
+    size: int,
+    request_flags: Optional[RequestFlags] = None,
     legacy_size_format: bool = False,
 ) -> bytes:
     """
     Build a memcache meta-set command
 
     :param key: The key to use
-    :param flags: The flags to use
+    :param size: The size of the value
+    :param request_flags: The flags to use
+    :param legacy_size_format: Whether to use legacy size syntax from 1.6.6
     """
     ...
 
 def build_meta_arithmetic(
     key: bytes,
-    flags: Optional[RequestFlags] = None,
+    request_flags: Optional[RequestFlags] = None,
 ) -> bytes:
     """
     Build a memcache meta-arithmetic command
 
     :param key: The key to use
-    :param flags: The flags to use
+    :param request_flags: The flags to use
     """
     ...
