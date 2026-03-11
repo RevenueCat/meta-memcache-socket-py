@@ -1,5 +1,5 @@
-from typing import Any, Optional, Tuple, Union
 import socket
+from typing import Any, Optional, Tuple, Union
 
 RESPONSE_VALUE: int  # 1 - VALUE (VA)
 RESPONSE_SUCCESS: int  # 2 - SUCCESS (OK or HD)
@@ -151,7 +151,6 @@ class ResponseFlags:
         opaque: Optional[bytes] = None,
     ) -> None: ...
     def __str__(self) -> str: ...
-
     @staticmethod
     def from_success_header(header: bytes) -> "ResponseFlags":
         """Parse response flags from a success (HD) header."""
@@ -305,4 +304,49 @@ class MemcacheSocket:
     def close(self) -> None: ...
     def sendall(self, data: bytes, with_noop: bool) -> None: ...
     def get_response(self) -> Union[Value, Success, Miss, NotStored, Conflict]: ...
-    def get_value(self, size: int) -> bytes: ...
+    # send_meta_* methods (for pipelining — send only, read later with get_response())
+    # Mutations automatically inject NOOP when no_reply is set in request_flags.
+    def send_meta_get(
+        self,
+        key: bytes,
+        request_flags: Optional[RequestFlags] = None,
+    ) -> None: ...
+    def send_meta_set(
+        self,
+        key: bytes,
+        value: bytes,
+        request_flags: Optional[RequestFlags] = None,
+    ) -> None: ...
+    def send_meta_delete(
+        self,
+        key: bytes,
+        request_flags: Optional[RequestFlags] = None,
+    ) -> None: ...
+    def send_meta_arithmetic(
+        self,
+        key: bytes,
+        request_flags: Optional[RequestFlags] = None,
+    ) -> None: ...
+
+    # meta_* methods (blocking — send + recv in one call)
+    def meta_get(
+        self,
+        key: bytes,
+        request_flags: Optional[RequestFlags] = None,
+    ) -> Union[Value, Success, Miss, NotStored, Conflict]: ...
+    def meta_set(
+        self,
+        key: bytes,
+        value: bytes,
+        request_flags: Optional[RequestFlags] = None,
+    ) -> Union[Value, Success, Miss, NotStored, Conflict]: ...
+    def meta_delete(
+        self,
+        key: bytes,
+        request_flags: Optional[RequestFlags] = None,
+    ) -> Union[Value, Success, Miss, NotStored, Conflict]: ...
+    def meta_arithmetic(
+        self,
+        key: bytes,
+        request_flags: Optional[RequestFlags] = None,
+    ) -> Union[Value, Success, Miss, NotStored, Conflict]: ...

@@ -13,6 +13,7 @@ from meta_memcache_socket import (
     MemcacheSocket,
     Miss,
     NotStored,
+    RequestFlags,
     ResponseFlags,
     Success,
     Value,
@@ -208,11 +209,12 @@ class TestGetResponseSuccess:
         assert resp.flags.stale is True
 
 
-# --- get_response: Value ---
+# --- get_response: Value (now includes value bytes) ---
 
 
 class TestGetResponseValue:
-    def test_value_response(self, socket_pair):
+    def test_value_response_includes_bytes(self, socket_pair):
+        """get_response() now reads value bytes automatically."""
         a, b = socket_pair
         ms = MemcacheSocket(a)
         b.sendall(b"VA 2 c1\r\nOK\r\n")
@@ -220,7 +222,7 @@ class TestGetResponseValue:
         assert isinstance(resp, Value)
         assert resp.size == 2
         assert resp.flags.cas_token == 1
-        assert resp.value is None  # Not yet read
+        assert resp.value == b"OK"
 
     def test_value_with_all_flags(self, socket_pair):
         a, b = socket_pair
@@ -229,6 +231,7 @@ class TestGetResponseValue:
         resp = ms.get_response()
         assert isinstance(resp, Value)
         assert resp.size == 3
+        assert resp.value == b"foo"
         assert resp.flags.cas_token == 999
         assert resp.flags.fetched is False
         assert resp.flags.last_access == 60
@@ -244,8 +247,117 @@ class TestGetResponseValue:
         b.sendall(b"VA 1 X Z\r\nx\r\n")
         resp = ms.get_response()
         assert isinstance(resp, Value)
+        assert resp.value == b"x"
         assert resp.flags.stale is True
         assert resp.flags.win is False
+
+    def test_empty_value(self, socket_pair):
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        b.sendall(b"VA 0\r\n\r\n")
+        resp = ms.get_response()
+        assert isinstance(resp, Value)
+        assert resp.size == 0
+        assert resp.value == b""
+
+    def test_large_value_exceeding_buffer(self, socket_pair):
+        """Value larger than the buffer size triggers temporary allocation."""
+        a, b = socket_pair
+        ms = MemcacheSocket(a, buffer_size=100)
+        payload = b"1234567890" * 20  # 200 bytes
+        b.sendall(b"VA 200 c1 Oxxx W\r\n" + payload + b"\r\n")
+        resp = ms.get_response()
+        assert isinstance(resp, Value)
+        assert resp.size == 200
+        assert resp.flags.cas_token == 1
+        assert resp.flags.win is True
+        assert bytes(resp.flags.opaque) == b"xxx"
+        assert len(resp.value) == 200
+        assert resp.value == payload
+
+    def test_value_with_incomplete_endl(self, socket_pair):
+        """Buffer is just big enough for value but ENDL splits across reads."""
+        a, b = socket_pair
+        ms = MemcacheSocket(a, buffer_size=18)
+        b.sendall(b"VA 10\r\n1234567890\r\n")
+        resp = ms.get_response()
+        assert isinstance(resp, Value)
+        assert resp.size == 10
+        assert resp.value == b"1234567890"
+
+    def test_value_with_incomplete_endl_then_response(self, socket_pair):
+        """After ENDL-split value read, buffer state must allow further responses."""
+        a, b = socket_pair
+        ms = MemcacheSocket(a, buffer_size=18)
+        b.sendall(b"VA 10\r\n1234567890\r\nEN\r\n")
+        resp = ms.get_response()
+        assert isinstance(resp, Value)
+        assert resp.value == b"1234567890"
+
+        resp2 = ms.get_response()
+        assert isinstance(resp2, Miss)
+
+    def test_value_with_incomplete_endl_then_value(self, socket_pair):
+        """ENDL-split followed by another value response."""
+        a, b = socket_pair
+        ms = MemcacheSocket(a, buffer_size=18)
+        b.sendall(b"VA 10\r\n1234567890\r\nVA 3\r\nfoo\r\n")
+        resp = ms.get_response()
+        assert isinstance(resp, Value)
+        assert resp.value == b"1234567890"
+
+        resp2 = ms.get_response()
+        assert isinstance(resp2, Value)
+        assert resp2.value == b"foo"
+
+    def test_multiple_values(self, socket_pair):
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        b.sendall(
+            b"VA 3\r\nfoo\r\n" b"VA 3\r\nbar\r\n" b"VA 3\r\nbaz\r\n"
+        )
+        for expected in [b"foo", b"bar", b"baz"]:
+            resp = ms.get_response()
+            assert isinstance(resp, Value)
+            assert resp.value == expected
+
+    def test_value_then_miss(self, socket_pair):
+        """Read a value, then a simple response."""
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        b.sendall(b"VA 5 f1\r\nhello\r\nEN\r\n")
+        resp1 = ms.get_response()
+        assert isinstance(resp1, Value)
+        assert resp1.value == b"hello"
+
+        resp2 = ms.get_response()
+        assert isinstance(resp2, Miss)
+
+    def test_interleaved_responses(self, socket_pair):
+        """Simulate pipelined responses: value, success, miss, value."""
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        b.sendall(
+            b"VA 2 f1\r\nhi\r\n"
+            b"HD c5\r\n"
+            b"EN\r\n"
+            b"VA 3 f2\r\nbye\r\n"
+        )
+        # Value
+        r = ms.get_response()
+        assert isinstance(r, Value)
+        assert r.value == b"hi"
+        # Success
+        r = ms.get_response()
+        assert isinstance(r, Success)
+        assert r.flags.cas_token == 5
+        # Miss
+        r = ms.get_response()
+        assert isinstance(r, Miss)
+        # Value
+        r = ms.get_response()
+        assert isinstance(r, Value)
+        assert r.value == b"bye"
 
 
 # --- get_response: server version 1.6.6 ---
@@ -267,152 +379,11 @@ class TestGetResponse166:
         resp = ms.get_response()
         assert isinstance(resp, Value)
         assert resp.size == 2
-        val = ms.get_value(resp.size)
-        assert val == b"OK"
+        assert resp.value == b"OK"
 
         resp2 = ms.get_response()
         assert isinstance(resp2, Success)
         assert resp2.flags.cas_token == 2
-
-
-# --- get_value ---
-
-
-class TestGetValue:
-    def test_small_value(self, socket_pair):
-        a, b = socket_pair
-        ms = MemcacheSocket(a)
-        b.sendall(b"VA 5\r\nhello\r\n")
-        resp = ms.get_response()
-        assert isinstance(resp, Value)
-        val = ms.get_value(resp.size)
-        assert val == b"hello"
-        assert isinstance(val, bytes)
-
-    def test_empty_value(self, socket_pair):
-        a, b = socket_pair
-        ms = MemcacheSocket(a)
-        b.sendall(b"VA 0\r\n\r\n")
-        resp = ms.get_response()
-        assert isinstance(resp, Value)
-        assert resp.size == 0
-        val = ms.get_value(resp.size)
-        assert val == b""
-
-    def test_large_value_exceeding_buffer(self, socket_pair):
-        """Value larger than the buffer size triggers temporary allocation."""
-        a, b = socket_pair
-        ms = MemcacheSocket(a, buffer_size=100)
-        payload = b"1234567890" * 20  # 200 bytes
-        b.sendall(b"VA 200 c1 Oxxx W\r\n" + payload + b"\r\n")
-        resp = ms.get_response()
-        assert isinstance(resp, Value)
-        assert resp.size == 200
-        assert resp.flags.cas_token == 1
-        assert resp.flags.win is True
-        assert bytes(resp.flags.opaque) == b"xxx"
-        val = ms.get_value(resp.size)
-        assert len(val) == 200
-        assert val == payload
-
-    def test_value_with_incomplete_endl(self, socket_pair):
-        """Buffer is just big enough for value but ENDL splits across reads."""
-        a, b = socket_pair
-        ms = MemcacheSocket(a, buffer_size=18)
-        b.sendall(b"VA 10\r\n1234567890\r\n")
-        resp = ms.get_response()
-        assert isinstance(resp, Value)
-        assert resp.size == 10
-        val = ms.get_value(resp.size)
-        assert val == b"1234567890"
-
-    def test_value_with_incomplete_endl_then_response(self, socket_pair):
-        """After ENDL-split value read, buffer state must allow further responses.
-
-        Regression test: the ENDL-split path in ensure_value consumed ENDL bytes
-        from the socket but not from the buffer. The caller then advanced pos past
-        read, corrupting buffer state for subsequent operations.
-        """
-        a, b = socket_pair
-        # buffer_size=18: header "VA 10\r\n" is 7 bytes, value is 10 bytes,
-        # so value fills the buffer and \r\n splits across reads.
-        ms = MemcacheSocket(a, buffer_size=18)
-        b.sendall(b"VA 10\r\n1234567890\r\nEN\r\n")
-        resp = ms.get_response()
-        assert isinstance(resp, Value)
-        val = ms.get_value(resp.size)
-        assert val == b"1234567890"
-
-        # This second get_response would panic/corrupt without the fix,
-        # because pos > read after the ENDL-split path.
-        resp2 = ms.get_response()
-        assert isinstance(resp2, Miss)
-
-    def test_value_with_incomplete_endl_then_value(self, socket_pair):
-        """ENDL-split followed by another value response."""
-        a, b = socket_pair
-        ms = MemcacheSocket(a, buffer_size=18)
-        b.sendall(b"VA 10\r\n1234567890\r\nVA 3\r\nfoo\r\n")
-        resp = ms.get_response()
-        assert isinstance(resp, Value)
-        assert ms.get_value(resp.size) == b"1234567890"
-
-        resp2 = ms.get_response()
-        assert isinstance(resp2, Value)
-        assert ms.get_value(resp2.size) == b"foo"
-
-    def test_multiple_values(self, socket_pair):
-        a, b = socket_pair
-        ms = MemcacheSocket(a)
-        b.sendall(
-            b"VA 3\r\nfoo\r\n"
-            b"VA 3\r\nbar\r\n"
-            b"VA 3\r\nbaz\r\n"
-        )
-        for expected in [b"foo", b"bar", b"baz"]:
-            resp = ms.get_response()
-            assert isinstance(resp, Value)
-            val = ms.get_value(resp.size)
-            assert val == expected
-
-    def test_value_then_miss(self, socket_pair):
-        """Read a value, then a simple response."""
-        a, b = socket_pair
-        ms = MemcacheSocket(a)
-        b.sendall(b"VA 5 f1\r\nhello\r\nEN\r\n")
-        resp1 = ms.get_response()
-        assert isinstance(resp1, Value)
-        val = ms.get_value(resp1.size)
-        assert val == b"hello"
-
-        resp2 = ms.get_response()
-        assert isinstance(resp2, Miss)
-
-    def test_interleaved_responses(self, socket_pair):
-        """Simulate pipelined responses: value, success, miss, value."""
-        a, b = socket_pair
-        ms = MemcacheSocket(a)
-        b.sendall(
-            b"VA 2 f1\r\nhi\r\n"
-            b"HD c5\r\n"
-            b"EN\r\n"
-            b"VA 3 f2\r\nbye\r\n"
-        )
-        # Value
-        r = ms.get_response()
-        assert isinstance(r, Value)
-        assert ms.get_value(r.size) == b"hi"
-        # Success
-        r = ms.get_response()
-        assert isinstance(r, Success)
-        assert r.flags.cas_token == 5
-        # Miss
-        r = ms.get_response()
-        assert isinstance(r, Miss)
-        # Value
-        r = ms.get_response()
-        assert isinstance(r, Value)
-        assert ms.get_value(r.size) == b"bye"
 
 
 # --- NOOP handling ---
@@ -475,16 +446,6 @@ class TestErrorHandling:
         b.close()
         with pytest.raises(ConnectionError):
             ms.get_response()
-
-    def test_closed_socket_on_get_value(self, socket_pair):
-        a, b = socket_pair
-        ms = MemcacheSocket(a)
-        b.sendall(b"VA 100\r\n")  # Claim 100 bytes but close
-        resp = ms.get_response()
-        assert isinstance(resp, Value)
-        b.close()
-        with pytest.raises(ConnectionError):
-            ms.get_value(resp.size)
 
     def test_closed_socket_on_sendall(self, socket_pair):
         a, b = socket_pair
@@ -563,8 +524,7 @@ class TestBufferManagement:
             b.sendall(b"VA 5\r\nhello\r\n")
             resp = ms.get_response()
             assert isinstance(resp, Value)
-            val = ms.get_value(resp.size)
-            assert val == b"hello"
+            assert resp.value == b"hello"
 
     def test_responses_spanning_buffer_boundary(self, socket_pair):
         """Header that arrives across multiple recv calls."""
@@ -577,19 +537,264 @@ class TestBufferManagement:
         resp = ms.get_response()
         assert isinstance(resp, Value)
         assert resp.flags.cas_token == 42
-        val = ms.get_value(resp.size)
-        assert val == b"foo"
+        assert resp.value == b"foo"
 
 
-# --- Version constants ---
+# --- send_meta_* (Tier 1: pipelining) ---
+
+
+class TestSendMeta:
+    def test_send_meta_get(self, socket_pair):
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        flags = RequestFlags(return_cas_token=True, cache_ttl=300)
+        ms.send_meta_get(b"mykey", flags)
+        data = b.recv(1024)
+        assert data == b"mg mykey c T300\r\n"
+
+    def test_send_meta_get_no_flags(self, socket_pair):
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        ms.send_meta_get(b"mykey")
+        data = b.recv(1024)
+        assert data == b"mg mykey\r\n"
+
+    def test_send_meta_set(self, socket_pair):
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        flags = RequestFlags(cache_ttl=300, client_flag=0)
+        ms.send_meta_set(b"mykey", b"hello", flags)
+        data = b.recv(1024)
+        assert data == b"ms mykey 5 T300 F0\r\nhello\r\n"
+
+    def test_send_meta_set_with_noop(self, socket_pair):
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        ms.send_meta_set(b"mykey", b"hello")
+        data_without = b.recv(1024)
+        assert data_without == b"ms mykey 5\r\nhello\r\n"
+
+    def test_send_meta_set_with_noop_flag(self, socket_pair):
+        """no_reply flag auto-injects NOOP."""
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        flags = RequestFlags(no_reply=True)
+        ms.send_meta_set(b"mykey", b"hi", flags)
+        data = b.recv(1024)
+        assert data == b"ms mykey 2 q\r\nhi\r\nmn\r\n"
+
+    def test_send_meta_set_empty_value(self, socket_pair):
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        ms.send_meta_set(b"mykey", b"")
+        data = b.recv(1024)
+        assert data == b"ms mykey 0\r\n\r\n"
+
+    def test_send_meta_delete(self, socket_pair):
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        flags = RequestFlags(cache_ttl=300)
+        ms.send_meta_delete(b"mykey", flags)
+        data = b.recv(1024)
+        assert data == b"md mykey T300\r\n"
+
+    def test_send_meta_arithmetic(self, socket_pair):
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        flags = RequestFlags(ma_delta_value=5)
+        ms.send_meta_arithmetic(b"mykey", flags)
+        data = b.recv(1024)
+        assert data == b"ma mykey D5\r\n"
+
+    def test_send_meta_get_invalid_key(self, socket_pair):
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        with pytest.raises(ValueError):
+            ms.send_meta_get(b"")
+        with pytest.raises(ValueError):
+            ms.send_meta_get(b"x" * 250)
+
+    def test_pipeline_send_then_recv(self, socket_pair):
+        """Full pipeline: send multiple, then recv multiple."""
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        flags = RequestFlags(return_cas_token=True)
+
+        # Send 3 gets
+        ms.send_meta_get(b"key1", flags)
+        ms.send_meta_get(b"key2", flags)
+        ms.send_meta_get(b"key3", flags)
+
+        # Server responds
+        b.sendall(
+            b"VA 3 c1\r\nfoo\r\n"
+            b"EN\r\n"
+            b"VA 3 c3\r\nbar\r\n"
+        )
+
+        r1 = ms.get_response()
+        assert isinstance(r1, Value)
+        assert r1.value == b"foo"
+        assert r1.flags.cas_token == 1
+
+        r2 = ms.get_response()
+        assert isinstance(r2, Miss)
+
+        r3 = ms.get_response()
+        assert isinstance(r3, Value)
+        assert r3.value == b"bar"
+        assert r3.flags.cas_token == 3
+
+
+# --- meta_* (Tier 3: blocking) ---
+
+
+class TestMetaBlocking:
+    def test_meta_get_miss(self, socket_pair):
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        # Server responds with miss after receiving get
+        b.sendall(b"EN\r\n")
+        resp = ms.meta_get(b"mykey")
+        assert isinstance(resp, Miss)
+
+    def test_meta_get_value(self, socket_pair):
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        flags = RequestFlags(return_cas_token=True, return_value=True)
+        b.sendall(b"VA 5 c42\r\nhello\r\n")
+        resp = ms.meta_get(b"mykey", flags)
+        assert isinstance(resp, Value)
+        assert resp.value == b"hello"
+        assert resp.flags.cas_token == 42
+
+    def test_meta_get_verifies_wire(self, socket_pair):
+        """meta_get sends the correct wire format."""
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        flags = RequestFlags(return_cas_token=True, cache_ttl=300)
+        # Need to respond so the blocking call doesn't hang
+        b.sendall(b"EN\r\n")
+        ms.meta_get(b"testkey", flags)
+        # Check what was sent
+        data = b.recv(1024)
+        assert data == b"mg testkey c T300\r\n"
+
+    def test_meta_set_success(self, socket_pair):
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        flags = RequestFlags(cache_ttl=300, client_flag=0)
+        b.sendall(b"HD c1\r\n")
+        resp = ms.meta_set(b"mykey", b"hello", flags)
+        assert isinstance(resp, Success)
+        assert resp.flags.cas_token == 1
+        # Check wire format
+        data = b.recv(1024)
+        assert data == b"ms mykey 5 T300 F0\r\nhello\r\n"
+
+    def test_meta_set_no_reply(self, socket_pair):
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        flags = RequestFlags(no_reply=True, cache_ttl=300)
+        resp = ms.meta_set(b"mykey", b"hello", flags)
+        assert isinstance(resp, Success)
+        # Check wire format includes noop
+        data = b.recv(1024)
+        assert data == b"ms mykey 5 q T300\r\nhello\r\nmn\r\n"
+
+    def test_meta_set_not_stored(self, socket_pair):
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        b.sendall(b"NS\r\n")
+        resp = ms.meta_set(b"mykey", b"hello")
+        assert isinstance(resp, NotStored)
+
+    def test_meta_delete_success(self, socket_pair):
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        b.sendall(b"HD\r\n")
+        resp = ms.meta_delete(b"mykey")
+        assert isinstance(resp, Success)
+        data = b.recv(1024)
+        assert data == b"md mykey\r\n"
+
+    def test_meta_delete_no_reply(self, socket_pair):
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        flags = RequestFlags(no_reply=True)
+        resp = ms.meta_delete(b"mykey", flags)
+        assert isinstance(resp, Success)
+        data = b.recv(1024)
+        assert data == b"md mykey q\r\nmn\r\n"
+
+    def test_meta_delete_miss(self, socket_pair):
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        b.sendall(b"NF\r\n")
+        resp = ms.meta_delete(b"mykey")
+        assert isinstance(resp, Miss)
+
+    def test_meta_arithmetic_success(self, socket_pair):
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        flags = RequestFlags(ma_delta_value=5, return_value=True)
+        b.sendall(b"VA 2\r\n10\r\n")
+        resp = ms.meta_arithmetic(b"counter", flags)
+        assert isinstance(resp, Value)
+        assert resp.value == b"10"
+        data = b.recv(1024)
+        assert data == b"ma counter v D5\r\n"
+
+    def test_meta_arithmetic_no_reply(self, socket_pair):
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        flags = RequestFlags(no_reply=True, ma_delta_value=1)
+        resp = ms.meta_arithmetic(b"counter", flags)
+        assert isinstance(resp, Success)
+        data = b.recv(1024)
+        assert data == b"ma counter q D1\r\nmn\r\n"
+
+    def test_meta_get_invalid_key(self, socket_pair):
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        with pytest.raises(ValueError):
+            ms.meta_get(b"")
+
+    def test_meta_set_legacy_version(self, socket_pair):
+        """AWS 1.6.6 uses legacy size format with S prefix."""
+        a, b = socket_pair
+        ms = MemcacheSocket(a, version=SERVER_VERSION_AWS_1_6_6)
+        b.sendall(b"HD\r\n")
+        ms.meta_set(b"mykey", b"hello")
+        data = b.recv(1024)
+        assert data == b"ms mykey S5\r\nhello\r\n"
+
+    def test_meta_no_reply_then_regular(self, socket_pair):
+        """no_reply command followed by regular command should work
+        (noop draining is handled correctly)."""
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        # no_reply delete
+        flags_noreply = RequestFlags(no_reply=True)
+        resp1 = ms.meta_delete(b"key1", flags_noreply)
+        assert isinstance(resp1, Success)
+
+        # Regular get — server sends noop response (from delete), then miss
+        b.sendall(b"MN\r\nEN\r\n")
+        resp2 = ms.meta_get(b"key2")
+        # The MN should be drained, and we get the EN (Miss)
+        assert isinstance(resp2, Miss)
+
+
+# --- Non-blocking sockets ---
 
 
 class TestNonBlockingSocket:
-    """Test with sockets in non-blocking mode (settimeout), matching Python's socket_factory_builder."""
+    """Test with sockets in non-blocking mode (settimeout)."""
 
     def test_settimeout_get_response(self, socket_pair):
         a, b = socket_pair
-        a.settimeout(5.0)  # Puts socket in non-blocking mode with timeout
+        a.settimeout(5.0)
         ms = MemcacheSocket(a)
 
         b.sendall(b"EN\r\n")
@@ -604,8 +809,7 @@ class TestNonBlockingSocket:
         b.sendall(b"VA 5\r\nhello\r\n")
         resp = ms.get_response()
         assert isinstance(resp, Value)
-        val = ms.get_value(resp.size)
-        assert val == b"hello"
+        assert resp.value == b"hello"
 
     def test_settimeout_large_value(self, socket_pair):
         a, b = socket_pair
@@ -616,8 +820,7 @@ class TestNonBlockingSocket:
         b.sendall(b"VA 500\r\n" + payload + b"\r\n")
         resp = ms.get_response()
         assert isinstance(resp, Value)
-        val = ms.get_value(resp.size)
-        assert val == payload
+        assert resp.value == payload
 
     def test_settimeout_sendall(self, socket_pair):
         a, b = socket_pair
@@ -644,15 +847,15 @@ class TestNonBlockingSocket:
         ms = MemcacheSocket(a)
 
         # Send two commands
-        ms.sendall(b"mg key1\r\n", False)
-        ms.sendall(b"mg key2\r\n", False)
+        ms.send_meta_get(b"key1")
+        ms.send_meta_get(b"key2")
 
         # Server responds
         b.sendall(b"VA 3 f1\r\nfoo\r\nEN\r\n")
 
         r1 = ms.get_response()
         assert isinstance(r1, Value)
-        assert ms.get_value(r1.size) == b"foo"
+        assert r1.value == b"foo"
 
         r2 = ms.get_response()
         assert isinstance(r2, Miss)
@@ -666,6 +869,18 @@ class TestNonBlockingSocket:
         b.sendall(b"EX\r\nMN\r\nHD c1\r\n")
         resp = ms.get_response()
         assert isinstance(resp, Success)
+        assert resp.flags.cas_token == 1
+
+    def test_settimeout_meta_blocking(self, socket_pair):
+        """Blocking meta_* with non-blocking sockets."""
+        a, b = socket_pair
+        a.settimeout(5.0)
+        ms = MemcacheSocket(a)
+
+        b.sendall(b"VA 5 c1\r\nhello\r\n")
+        resp = ms.meta_get(b"mykey", RequestFlags(return_cas_token=True, return_value=True))
+        assert isinstance(resp, Value)
+        assert resp.value == b"hello"
         assert resp.flags.cas_token == 1
 
 
@@ -682,22 +897,6 @@ class TestSocketTimeout:
         with pytest.raises(TimeoutError):
             ms.get_response()
 
-    def test_get_value_timeout(self, socket_pair):
-        """get_value() should raise TimeoutError when value data doesn't arrive."""
-        a, b = socket_pair
-        a.settimeout(0.1)
-        ms = MemcacheSocket(a)
-
-        # Send header but not the value data
-        b.sendall(b"VA 100\r\n")
-        resp = ms.get_response()
-        assert isinstance(resp, Value)
-        assert resp.size == 100
-
-        # Value data never arrives — should timeout
-        with pytest.raises((TimeoutError, ConnectionError)):
-            ms.get_value(resp.size)
-
     def test_sendall_timeout(self, socket_pair):
         """sendall() should raise TimeoutError when send buffer is full."""
         a, b = socket_pair
@@ -705,7 +904,6 @@ class TestSocketTimeout:
         ms = MemcacheSocket(a)
 
         # Fill the send buffer until it blocks, then expect timeout.
-        # Use a large payload to overwhelm the socket buffer.
         big_data = b"x" * (1024 * 1024 * 10)  # 10MB
         with pytest.raises((TimeoutError, ConnectionError)):
             for _ in range(100):
@@ -714,7 +912,6 @@ class TestSocketTimeout:
     def test_blocking_socket_no_timeout(self, socket_pair):
         """Blocking socket (no settimeout) should not have poll timeout issues."""
         a, b = socket_pair
-        # No settimeout — socket is blocking, timeout should be -1 (infinite)
         ms = MemcacheSocket(a)
 
         b.sendall(b"EN\r\n")
@@ -746,6 +943,5 @@ class TestVersionConstants:
 
     def test_version_matches_intenum(self):
         """ServerVersion IntEnum values match Rust constants."""
-        # These must match for backward compatibility
         assert SERVER_VERSION_AWS_1_6_6 == 1
         assert SERVER_VERSION_STABLE == 2

@@ -65,8 +65,15 @@ pub fn build_cmd<'py>(
     request_flags: Option<&RequestFlags>,
     legacy_size_format: bool,
 ) -> PyResult<Bound<'py, PyBytes>> {
-    match impl_build_cmd(cmd, key, size, request_flags, legacy_size_format) {
-        Some(buf) => Ok(PyBytes::new(py, &buf)),
+    match impl_build_cmd(
+        cmd,
+        key,
+        size,
+        request_flags,
+        legacy_size_format,
+        /* allow_no_reply_flag */ true,
+    ) {
+        Some(built) => Ok(PyBytes::new(py, &built.buf)),
         None => Err(pyo3::exceptions::PyValueError::new_err("Key is too long")),
     }
 }
@@ -84,8 +91,15 @@ pub fn build_meta_get<'py>(
     key: &[u8],
     request_flags: Option<&RequestFlags>,
 ) -> PyResult<Bound<'py, PyBytes>> {
-    match impl_build_cmd(b"mg", key, None, request_flags, false) {
-        Some(buf) => Ok(PyBytes::new(py, &buf)),
+    match impl_build_cmd(
+        b"mg",
+        key,
+        None,
+        request_flags,
+        /* legacy_size_format */ false,
+        /* allow_no_reply_flag */ true,
+    ) {
+        Some(built) => Ok(PyBytes::new(py, &built.buf)),
         None => Err(pyo3::exceptions::PyValueError::new_err("Key is too long")),
     }
 }
@@ -107,8 +121,15 @@ pub fn build_meta_set<'py>(
     request_flags: Option<&RequestFlags>,
     legacy_size_format: bool,
 ) -> PyResult<Bound<'py, PyBytes>> {
-    match impl_build_cmd(b"ms", key, Some(size), request_flags, legacy_size_format) {
-        Some(buf) => Ok(PyBytes::new(py, &buf)),
+    match impl_build_cmd(
+        b"ms",
+        key,
+        Some(size),
+        request_flags,
+        legacy_size_format,
+        /* allow_no_reply_flag */ true,
+    ) {
+        Some(built) => Ok(PyBytes::new(py, &built.buf)),
         None => Err(pyo3::exceptions::PyValueError::new_err("Key is too long")),
     }
 }
@@ -126,8 +147,15 @@ pub fn build_meta_delete<'py>(
     key: &[u8],
     request_flags: Option<&RequestFlags>,
 ) -> PyResult<Bound<'py, PyBytes>> {
-    match impl_build_cmd(b"md", key, None, request_flags, false) {
-        Some(buf) => Ok(PyBytes::new(py, &buf)),
+    match impl_build_cmd(
+        b"md",
+        key,
+        None,
+        request_flags,
+        /* legacy_size_format */ false,
+        /* allow_no_reply_flag */ true,
+    ) {
+        Some(built) => Ok(PyBytes::new(py, &built.buf)),
         None => Err(pyo3::exceptions::PyValueError::new_err("Key is too long")),
     }
 }
@@ -145,14 +173,22 @@ pub fn build_meta_arithmetic<'py>(
     key: &[u8],
     request_flags: Option<&RequestFlags>,
 ) -> PyResult<Bound<'py, PyBytes>> {
-    match impl_build_cmd(b"ma", key, None, request_flags, false) {
-        Some(buf) => Ok(PyBytes::new(py, &buf)),
+    match impl_build_cmd(
+        b"ma",
+        key,
+        None,
+        request_flags,
+        /* legacy_size_format */ false,
+        /* allow_no_reply_flag */ true,
+    ) {
+        Some(built) => Ok(PyBytes::new(py, &built.buf)),
         None => Err(pyo3::exceptions::PyValueError::new_err("Key is too long")),
     }
 }
 
 #[pymodule(gil_used = false)]
 fn meta_memcache_socket(module: &Bound<'_, PyModule>) -> PyResult<()> {
+    pyo3_log::init();
     // Classes
     module.add_class::<ResponseFlags>()?;
     module.add_class::<RequestFlags>()?;

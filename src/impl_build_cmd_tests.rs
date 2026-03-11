@@ -30,11 +30,12 @@ mod tests {
             Some(b'A'),               // mode (APPEND)
         );
 
-        let result = impl_build_cmd(cmd, key, None, Some(&request_flags), false).unwrap();
-        let string = String::from_utf8_lossy(&result);
+        let built = impl_build_cmd(cmd, key, None, Some(&request_flags), false, true).unwrap();
+        let string = String::from_utf8_lossy(&built.buf);
         println!("{:?}", string);
+        assert!(built.no_reply);
         assert_eq!(
-            result,
+            built.buf,
             b"mg key q f c v t s l h k u I T111 R222 N333 F444 J555 D666 C777 Oopaque MA\r\n"
         );
     }
@@ -66,10 +67,11 @@ mod tests {
             None,  // mode
         );
 
-        let result = impl_build_cmd(cmd, key, None, Some(&request_flags), false).unwrap();
-        let string = String::from_utf8_lossy(&result);
+        let built = impl_build_cmd(cmd, key, None, Some(&request_flags), false, true).unwrap();
+        let string = String::from_utf8_lossy(&built.buf);
         println!("{:?}", string);
-        assert_eq!(result, b"mg key\r\n");
+        assert!(!built.no_reply);
+        assert_eq!(built.buf, b"mg key\r\n");
     }
 
     #[test]
@@ -99,10 +101,10 @@ mod tests {
             None,  // mode
         );
 
-        let result = impl_build_cmd(cmd, key, None, Some(&request_flags), false).unwrap();
-        let string = String::from_utf8_lossy(&result);
+        let built = impl_build_cmd(cmd, key, None, Some(&request_flags), false, true).unwrap();
+        let string = String::from_utf8_lossy(&built.buf);
         println!("{:?}", string);
-        assert_eq!(result, b"mg S2V5X3dpdGhfYmluYXJ5AA== b\r\n");
+        assert_eq!(built.buf, b"mg S2V5X3dpdGhfYmluYXJ5AA== b\r\n");
     }
 
     #[test]
@@ -132,50 +134,50 @@ mod tests {
             None,  // mode
         );
 
-        let result = impl_build_cmd(cmd, key, None, Some(&request_flags), false).unwrap();
-        let string = String::from_utf8_lossy(&result);
+        let built = impl_build_cmd(cmd, key, None, Some(&request_flags), false, true).unwrap();
+        let string = String::from_utf8_lossy(&built.buf);
         println!("{:?}", string);
-        assert_eq!(result, b"mg S2V5IHdpdGggc3BhY2Vz b\r\n");
+        assert_eq!(built.buf, b"mg S2V5IHdpdGggc3BhY2Vz b\r\n");
     }
 
     #[test]
     fn test_empty_key_rejected() {
-        assert!(impl_build_cmd(b"mg", b"", None, None, false).is_none());
+        assert!(impl_build_cmd(b"mg", b"", None, None, false, true).is_none());
     }
 
     #[test]
     fn test_key_at_max_length() {
         // 249 bytes is OK (< 250)
         let key = &vec![b'X'; 249];
-        assert!(impl_build_cmd(b"mg", key, None, None, false).is_some());
+        assert!(impl_build_cmd(b"mg", key, None, None, false, true).is_some());
     }
 
     #[test]
     fn test_key_at_exact_max_length() {
         // 250 bytes is rejected (>= MAX_KEY_LEN)
         let key = &vec![b'X'; 250];
-        assert!(impl_build_cmd(b"mg", key, None, None, false).is_none());
+        assert!(impl_build_cmd(b"mg", key, None, None, false, true).is_none());
     }
 
     #[test]
     fn test_binary_key_at_max_length() {
         // 186 binary bytes is OK (< 187 = MAX_BIN_KEY_LEN)
         let key = &vec![0x00u8; 186];
-        assert!(impl_build_cmd(b"mg", key, None, None, false).is_some());
+        assert!(impl_build_cmd(b"mg", key, None, None, false, true).is_some());
     }
 
     #[test]
     fn test_binary_key_at_exact_max_length() {
         // 187 binary bytes is rejected (>= MAX_BIN_KEY_LEN)
         let key = &vec![0x00u8; 187];
-        assert!(impl_build_cmd(b"mg", key, None, None, false).is_none());
+        assert!(impl_build_cmd(b"mg", key, None, None, false, true).is_none());
     }
 
     #[test]
     fn test_impl_build_cmd_large_key() {
         let cmd = b"mg";
         let key = &vec![b'X'; 250];
-        assert!(impl_build_cmd(cmd, key, None, None, false).is_none());
+        assert!(impl_build_cmd(cmd, key, None, None, false, true).is_none());
     }
 
     #[test]
@@ -206,10 +208,11 @@ mod tests {
             None,      // mode
         );
 
-        let result = impl_build_cmd(cmd, key, Some(size), Some(&request_flags), false).unwrap();
-        let string = String::from_utf8_lossy(&result);
+        let built =
+            impl_build_cmd(cmd, key, Some(size), Some(&request_flags), false, true).unwrap();
+        let string = String::from_utf8_lossy(&built.buf);
         println!("{:?}", string);
-        assert_eq!(result, b"ms key 123 T111\r\n");
+        assert_eq!(built.buf, b"ms key 123 T111\r\n");
     }
 
     #[test]
@@ -218,9 +221,10 @@ mod tests {
         let key = b"key";
         let size = 123;
 
-        let result = impl_build_cmd(cmd, key, Some(size), None, true).unwrap();
-        let string = String::from_utf8_lossy(&result);
+        let built = impl_build_cmd(cmd, key, Some(size), None, true, true).unwrap();
+        let string = String::from_utf8_lossy(&built.buf);
         println!("{:?}", string);
-        assert_eq!(result, b"ms key S123\r\n");
+        assert!(!built.no_reply);
+        assert_eq!(built.buf, b"ms key S123\r\n");
     }
 }

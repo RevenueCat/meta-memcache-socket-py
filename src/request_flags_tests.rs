@@ -12,7 +12,7 @@ mod tests {
 
     fn push_to_vec(flags: &RequestFlags) -> Vec<u8> {
         let mut buf = Vec::new();
-        flags.push_bytes(&mut buf);
+        flags.push_bytes(&mut buf, /* allow_no_reply_flag */ true);
         buf
     }
 
