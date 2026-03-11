@@ -1,4 +1,5 @@
-from typing import Optional, Tuple, Union
+from typing import Any, Optional, Tuple, Union
+import socket
 
 RESPONSE_VALUE: int  # 1 - VALUE (VA)
 RESPONSE_SUCCESS: int  # 2 - SUCCESS (OK or HD)
@@ -23,6 +24,10 @@ SET_MODE_SET: int  # 83 ('S')
 MA_MODE_INC: int  # 43 ('+')
 # - "decrement"
 MA_MODE_DEC: int  # 45 ('-')
+
+# Server versions
+SERVER_VERSION_AWS_1_6_6: int  # 1
+SERVER_VERSION_STABLE: int  # 2
 
 class RequestFlags:
     """
@@ -245,3 +250,59 @@ def build_meta_arithmetic(
     :param request_flags: The flags to use
     """
     ...
+
+class Miss:
+    def __init__(self) -> None: ...
+    def __repr__(self) -> str: ...
+    def __bool__(self) -> bool: ...
+
+class NotStored:
+    def __init__(self) -> None: ...
+    def __repr__(self) -> str: ...
+    def __bool__(self) -> bool: ...
+
+class Conflict:
+    def __init__(self) -> None: ...
+    def __repr__(self) -> str: ...
+    def __bool__(self) -> bool: ...
+
+class Success:
+    flags: ResponseFlags
+
+    def __init__(self, flags: ResponseFlags) -> None: ...
+    def __repr__(self) -> str: ...
+
+class Value:
+    size: int
+    flags: ResponseFlags
+    value: Any
+
+    def __init__(
+        self,
+        size: int,
+        flags: ResponseFlags,
+        value: Any = None,
+    ) -> None: ...
+    def __repr__(self) -> str: ...
+
+class MemcacheSocket:
+    """
+    A high-performance memcache socket that handles the meta-protocol
+    communication with a memcached server.
+
+    Releases the GIL during socket I/O operations.
+    """
+
+    def __init__(
+        self,
+        conn: socket.socket,
+        buffer_size: int = 4096,
+        version: int = ...,  # SERVER_VERSION_STABLE
+    ) -> None: ...
+    def __str__(self) -> str: ...
+    def get_version(self) -> int: ...
+    def set_socket(self, conn: socket.socket) -> None: ...
+    def close(self) -> None: ...
+    def sendall(self, data: bytes, with_noop: bool) -> None: ...
+    def get_response(self) -> Union[Value, Success, Miss, NotStored, Conflict]: ...
+    def get_value(self, size: int) -> bytes: ...

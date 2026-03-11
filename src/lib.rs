@@ -3,10 +3,12 @@ mod impl_build_cmd;
 mod impl_build_cmd_tests;
 mod impl_parse_header;
 mod impl_parse_header_tests;
+mod memcache_socket;
 mod request_flags;
 mod request_flags_tests;
 mod response_flags;
 mod response_flags_tests;
+mod response_types;
 pub use constants::*;
 use impl_build_cmd::impl_build_cmd;
 use impl_parse_header::impl_parse_header;
@@ -151,14 +153,25 @@ pub fn build_meta_arithmetic<'py>(
 
 #[pymodule(gil_used = false)]
 fn meta_memcache_socket(module: &Bound<'_, PyModule>) -> PyResult<()> {
+    // Classes
     module.add_class::<ResponseFlags>()?;
     module.add_class::<RequestFlags>()?;
+    module.add_class::<memcache_socket::MemcacheSocket>()?;
+    module.add_class::<response_types::Value>()?;
+    module.add_class::<response_types::Success>()?;
+    module.add_class::<response_types::Miss>()?;
+    module.add_class::<response_types::NotStored>()?;
+    module.add_class::<response_types::Conflict>()?;
+
+    // Functions
     module.add_function(wrap_pyfunction!(parse_header, module)?)?;
     module.add_function(wrap_pyfunction!(build_cmd, module)?)?;
     module.add_function(wrap_pyfunction!(build_meta_get, module)?)?;
     module.add_function(wrap_pyfunction!(build_meta_set, module)?)?;
     module.add_function(wrap_pyfunction!(build_meta_delete, module)?)?;
     module.add_function(wrap_pyfunction!(build_meta_arithmetic, module)?)?;
+
+    // Constants
     module.add("RESPONSE_VALUE", RESPONSE_VALUE)?;
     module.add("RESPONSE_SUCCESS", RESPONSE_SUCCESS)?;
     module.add("RESPONSE_NOT_STORED", RESPONSE_NOT_STORED)?;
@@ -172,5 +185,7 @@ fn meta_memcache_socket(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add("SET_MODE_SET", SET_MODE_SET)?;
     module.add("MA_MODE_INC", MA_MODE_INC)?;
     module.add("MA_MODE_DEC", MA_MODE_DEC)?;
+    module.add("SERVER_VERSION_AWS_1_6_6", SERVER_VERSION_AWS_1_6_6)?;
+    module.add("SERVER_VERSION_STABLE", SERVER_VERSION_STABLE)?;
     Ok(())
 }

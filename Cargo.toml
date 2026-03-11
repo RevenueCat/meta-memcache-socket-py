@@ -1,6 +1,6 @@
 [package]
 name = "meta-memcache-socket"
-version = "0.1.7"
+version = "2.0.0-alpha.1"
 edition = "2024"
 
 [lib]
@@ -11,5 +11,6 @@ crate-type = ["cdylib"]
 atoi = "2.0.0"
 base64 = "0.22.1"
 itoa = "1"
+libc = "0.2"
 memchr = "2"
 pyo3 = { version = "0.28", features = ["extension-module"] }

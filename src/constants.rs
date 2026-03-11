@@ -18,3 +18,11 @@ pub const SET_MODE_REPLACE: u8 = 82; // 'R'
 pub const SET_MODE_SET: u8 = 83; // 'S'
 pub const MA_MODE_INC: u8 = 43; // '+'
 pub const MA_MODE_DEC: u8 = 45; // '-'
+
+pub const NOOP_CMD: &[u8] = b"mn\r\n";
+pub const ENDL: &[u8] = b"\r\n";
+pub const ENDL_LEN: usize = 2;
+
+// Server versions
+pub const SERVER_VERSION_AWS_1_6_6: u8 = 1;
+pub const SERVER_VERSION_STABLE: u8 = 2;
