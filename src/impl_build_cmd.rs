@@ -1,9 +1,5 @@
-use base64::{Engine as _, engine::general_purpose};
-
 use crate::RequestFlags;
-
-const MAX_KEY_LEN: usize = 250;
-const MAX_BIN_KEY_LEN: usize = 187; // 250 * 3 / 4 due to b64 encoding
+use crate::encode_key::encode_key;
 
 pub struct BuiltCmd {
     pub buf: Vec<u8>,
@@ -18,14 +14,7 @@ pub fn impl_build_cmd(
     legacy_size_format: bool,
     allow_no_reply_flag: bool,
 ) -> Option<BuiltCmd> {
-    if key.is_empty() || key.len() >= MAX_KEY_LEN {
-        return None;
-    }
-    let binary = key.iter().any(|&c| c <= b' ' || c > b'~');
-    if binary && key.len() >= MAX_BIN_KEY_LEN {
-        // Key is too long
-        return None;
-    }
+    let encoded_key = encode_key(key)?;
 
     // Build the command
     let mut buf: Vec<u8> = Vec::with_capacity(128);
@@ -34,15 +23,8 @@ pub fn impl_build_cmd(
     buf.extend_from_slice(cmd);
     buf.push(b' ');
 
-    // Add key
-    if binary {
-        // If the key contains binary or spaces, it will be send in b64
-        let result = general_purpose::STANDARD.encode(key);
-        buf.extend_from_slice(result.as_bytes());
-    } else {
-        // Otherwise, it will be send as is
-        buf.extend_from_slice(key);
-    }
+    // Add wire-ready key (already base64-encoded if binary)
+    buf.extend_from_slice(&encoded_key.value);
 
     // Add size
     if let Some(size) = size {
@@ -55,9 +37,8 @@ pub fn impl_build_cmd(
     }
 
     // Add request flags
-    if binary {
-        // If the key is binary, it will be send in b64. Adding the b flag will
-        // tell the server to decode it and store it as binary, saving memory.
+    if encoded_key.is_binary {
+        // Tell the server to decode the base64 key and store it as binary
         buf.push(b' ');
         buf.push(b'b');
     }

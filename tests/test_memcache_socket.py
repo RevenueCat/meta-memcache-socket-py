@@ -4,6 +4,8 @@ Mirrors the tests from meta-memcache-py/tests/memcache_socket_test.py
 but tests the Rust implementation directly.
 """
 
+import base64
+import hashlib
 import socket
 
 import pytest
@@ -606,13 +608,11 @@ class TestSendMeta:
         data = b.recv(1024)
         assert data == b"ma mykey D5\r\n"
 
-    def test_send_meta_get_invalid_key(self, socket_pair):
+    def test_send_meta_get_empty_key(self, socket_pair):
         a, b = socket_pair
         ms = MemcacheSocket(a)
         with pytest.raises(ValueError):
             ms.send_meta_get(b"")
-        with pytest.raises(ValueError):
-            ms.send_meta_get(b"x" * 250)
 
     def test_pipeline_send_then_recv(self, socket_pair):
         """Full pipeline: send multiple, then recv multiple."""
@@ -934,6 +934,72 @@ class TestSocketTimeout:
         finally:
             c.close()
             d.close()
+
+
+# --- String key encoding ---
+
+
+class TestStringKeys:
+    def test_small_ascii_str_key(self, socket_pair):
+        """Plain ASCII string key passes through as UTF-8 bytes unchanged."""
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        b.sendall(b"EN\r\n")
+        ms.meta_get("hello")
+        data = b.recv(1024)
+        assert data == b"mg hello\r\n"
+
+    def test_large_str_key_hashed(self, socket_pair):
+        """String key >= 187 chars is blake2b-hashed and base64-encoded with 'b' flag."""
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        key = "k" * 200
+        b.sendall(b"EN\r\n")
+        ms.meta_get(key)
+        data = b.recv(1024)
+        digest = hashlib.blake2b(key.encode(), digest_size=18).digest()
+        expected_b64 = base64.b64encode(digest)
+        assert data == b"mg " + expected_b64 + b" b\r\n"
+
+    def test_unicode_str_key(self, socket_pair):
+        """Unicode key is UTF-8 encoded then base64-encoded with 'b' flag."""
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        key = "caf\u00e9"  # "café" — non-ASCII byte \xc3\xa9
+        b.sendall(b"EN\r\n")
+        ms.meta_get(key)
+        data = b.recv(1024)
+        expected_b64 = base64.b64encode(key.encode("utf-8"))
+        assert data == b"mg " + expected_b64 + b" b\r\n"
+
+    def test_str_key_meta_set(self, socket_pair):
+        """meta_set accepts a str key (ASCII)."""
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        b.sendall(b"HD\r\n")
+        ms.meta_set("mykey", b"value")
+        data = b.recv(1024)
+        assert data == b"ms mykey 5\r\nvalue\r\n"
+
+    def test_str_key_meta_delete(self, socket_pair):
+        """meta_delete accepts a str key (ASCII)."""
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        b.sendall(b"HD\r\n")
+        ms.meta_delete("mykey")
+        data = b.recv(1024)
+        assert data == b"md mykey\r\n"
+
+    def test_unicode_str_key_meta_set(self, socket_pair):
+        """meta_set with a unicode key base64-encodes it and adds 'b' flag."""
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        key = "\u6d4b\u8bd5"  # "测试" (Chinese, 6 UTF-8 bytes)
+        b.sendall(b"HD\r\n")
+        ms.meta_set(key, b"val")
+        data = b.recv(1024)
+        expected_b64 = base64.b64encode(key.encode("utf-8"))
+        assert data == b"ms " + expected_b64 + b" 3 b\r\nval\r\n"
 
 
 class TestVersionConstants:

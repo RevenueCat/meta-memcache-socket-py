@@ -182,7 +182,7 @@ def parse_header(
 
 def build_cmd(
     cmd: bytes,
-    key: bytes,
+    key: Union[str, bytes],
     size: Optional[int] = None,
     request_flags: Optional[RequestFlags] = None,
     legacy_size_format: bool = False,
@@ -199,7 +199,7 @@ def build_cmd(
     ...
 
 def build_meta_get(
-    key: bytes,
+    key: Union[str, bytes],
     request_flags: Optional[RequestFlags] = None,
 ) -> bytes:
     """
@@ -211,7 +211,7 @@ def build_meta_get(
     ...
 
 def build_meta_delete(
-    key: bytes,
+    key: Union[str, bytes],
     request_flags: Optional[RequestFlags] = None,
 ) -> bytes:
     """
@@ -223,7 +223,7 @@ def build_meta_delete(
     ...
 
 def build_meta_set(
-    key: bytes,
+    key: Union[str, bytes],
     size: int,
     request_flags: Optional[RequestFlags] = None,
     legacy_size_format: bool = False,
@@ -239,7 +239,7 @@ def build_meta_set(
     ...
 
 def build_meta_arithmetic(
-    key: bytes,
+    key: Union[str, bytes],
     request_flags: Optional[RequestFlags] = None,
 ) -> bytes:
     """
@@ -308,45 +308,45 @@ class MemcacheSocket:
     # Mutations automatically inject NOOP when no_reply is set in request_flags.
     def send_meta_get(
         self,
-        key: bytes,
+        key: Union[str, bytes],
         request_flags: Optional[RequestFlags] = None,
     ) -> None: ...
     def send_meta_set(
         self,
-        key: bytes,
+        key: Union[str, bytes],
         value: bytes,
         request_flags: Optional[RequestFlags] = None,
     ) -> None: ...
     def send_meta_delete(
         self,
-        key: bytes,
+        key: Union[str, bytes],
         request_flags: Optional[RequestFlags] = None,
     ) -> None: ...
     def send_meta_arithmetic(
         self,
-        key: bytes,
+        key: Union[str, bytes],
         request_flags: Optional[RequestFlags] = None,
     ) -> None: ...
 
     # meta_* methods (blocking — send + recv in one call)
     def meta_get(
         self,
-        key: bytes,
+        key: Union[str, bytes],
         request_flags: Optional[RequestFlags] = None,
     ) -> Union[Value, Success, Miss, NotStored, Conflict]: ...
     def meta_set(
         self,
-        key: bytes,
+        key: Union[str, bytes],
         value: bytes,
         request_flags: Optional[RequestFlags] = None,
     ) -> Union[Value, Success, Miss, NotStored, Conflict]: ...
     def meta_delete(
         self,
-        key: bytes,
+        key: Union[str, bytes],
         request_flags: Optional[RequestFlags] = None,
     ) -> Union[Value, Success, Miss, NotStored, Conflict]: ...
     def meta_arithmetic(
         self,
-        key: bytes,
+        key: Union[str, bytes],
         request_flags: Optional[RequestFlags] = None,
     ) -> Union[Value, Success, Miss, NotStored, Conflict]: ...
