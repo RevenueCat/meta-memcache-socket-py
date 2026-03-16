@@ -1,7 +1,7 @@
 use std::os::fd::RawFd;
 
 use log::warn;
-
+use memchr::memmem;
 use pyo3::BoundObject;
 use pyo3::exceptions::{PyConnectionError, PyTimeoutError, PyValueError};
 use pyo3::prelude::*;
@@ -874,5 +874,83 @@ impl MemcacheSocket {
             results.push(self.make_response(py, header, value_data)?);
         }
         Ok(results)
+    }
+
+    // -----------------------------------------------------------------------
+    // Raw command passthrough
+    // -----------------------------------------------------------------------
+
+    /// Send a raw command and return the raw response bytes.
+    ///
+    /// Appends \r\n to the command if not already present.
+    /// If `multi_line` is false, reads until \r\n and returns the line.
+    /// If `multi_line` is true, reads until END\r\n and returns everything before it.
+    /// Uses a separate buffer to avoid disturbing the main I/O state.
+    /// Releases the GIL during socket I/O.
+    #[pyo3(signature = (cmd, multi_line=false))]
+    pub fn raw_cmd<'py>(
+        &self,
+        py: Python<'py>,
+        cmd: &[u8],
+        multi_line: bool,
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        // Build command with \r\n if needed
+        let cmd_bytes = if cmd.ends_with(b"\r\n") {
+            cmd.to_vec()
+        } else {
+            let mut buf = Vec::with_capacity(cmd.len() + 2);
+            buf.extend_from_slice(cmd);
+            buf.extend_from_slice(b"\r\n");
+            buf
+        };
+
+        let fd = self.io.fd;
+        let timeout_ms = self.io.timeout_ms;
+
+        let response = py
+            .detach(|| {
+                send_all(fd, &cmd_bytes, timeout_ms)?;
+                raw_recv(fd, timeout_ms, multi_line)
+            })
+            .map_err(|e| socket_err_io("Error in raw_cmd", e))?;
+
+        Ok(PyBytes::new(py, &response))
+    }
+}
+
+/// Receive a raw response into a standalone buffer (not the main SocketIO buffer).
+/// For single-line: read until \r\n, return everything before it.
+/// For multi-line: read until END\r\n, return everything before it.
+fn raw_recv(
+    fd: RawFd,
+    timeout_ms: libc::c_int,
+    multi_line: bool,
+) -> Result<Vec<u8>, std::io::Error> {
+    let mut buf = Vec::with_capacity(1024);
+    let mut tmp = [0u8; 4096];
+
+    loop {
+        let n = recv_into(fd, &mut tmp, timeout_ms)?;
+        if n == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::ConnectionAborted,
+                "Connection closed during raw_recv",
+            ));
+        }
+        buf.extend_from_slice(&tmp[..n]);
+
+        if multi_line {
+            // Look for END\r\n — can appear at start of a line
+            if let Some(pos) = memmem::find(&buf, b"END\r\n") {
+                buf.truncate(pos);
+                return Ok(buf);
+            }
+        } else {
+            // Look for first \r\n
+            if let Some(pos) = memmem::find(&buf, b"\r\n") {
+                buf.truncate(pos);
+                return Ok(buf);
+            }
+        }
     }
 }
