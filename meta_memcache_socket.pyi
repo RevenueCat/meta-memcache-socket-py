@@ -367,3 +367,21 @@ class MemcacheSocket:
         :param request_flags: The flags to use for all keys
         """
         ...
+
+    # Raw command passthrough
+    def raw_cmd(
+        self,
+        cmd: bytes,
+        multi_line: bool = False,
+    ) -> bytes:
+        """
+        Send a raw command and return the raw response bytes.
+
+        Appends \\r\\n to the command if not already present.
+        If multi_line is False, reads until \\r\\n and returns the line.
+        If multi_line is True, reads until END\\r\\n and returns everything before it.
+
+        :param cmd: The raw command bytes to send
+        :param multi_line: Whether to expect a multi-line response (terminated by END\\r\\n)
+        """
+        ...
