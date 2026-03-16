@@ -372,3 +372,21 @@ class MemcacheSocket:
         key: Union[str, bytes],
         request_flags: Optional[RequestFlags] = None,
     ) -> Union[Value, Success, Miss, NotStored, Conflict]: ...
+
+    # Batch operations
+    def meta_multiget(
+        self,
+        keys: list[Union[str, bytes]],
+        request_flags: Optional[RequestFlags] = None,
+    ) -> list[Union[Value, Success, Miss, NotStored, Conflict]]:
+        """
+        Send multiple meta get commands and return all responses in one batch.
+
+        Builds all commands into one buffer, sends in a single operation, then
+        receives all responses in a tight Rust loop. GIL is released during
+        all socket I/O. Returns a list of responses in the same order as keys.
+
+        :param keys: List of keys to get
+        :param request_flags: The flags to use for all keys
+        """
+        ...

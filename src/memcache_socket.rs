@@ -5,7 +5,7 @@ use log::warn;
 use pyo3::BoundObject;
 use pyo3::exceptions::{PyConnectionError, PyTimeoutError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::PyBytes;
+use pyo3::types::{PyBytes, PyList};
 
 use crate::constants::*;
 use crate::encode_key::extract_key;
@@ -806,5 +806,73 @@ impl MemcacheSocket {
             CmdResult::NoReply => Self::success_no_reply(py),
             CmdResult::Response((header, value_data)) => self.make_response(py, header, value_data),
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Batch: meta_multiget (pipelined multi-key get in one Rust call)
+    // -----------------------------------------------------------------------
+
+    /// Send multiple meta get commands and return all responses in one batch.
+    ///
+    /// Builds all commands into one buffer, sends in a single operation, then
+    /// receives all responses in a tight Rust loop. GIL is released during
+    /// all socket I/O. Returns a list of responses in the same order as keys.
+    #[pyo3(signature = (keys, request_flags=None))]
+    pub fn meta_multiget(
+        &mut self,
+        py: Python<'_>,
+        keys: &Bound<'_, PyList>,
+        request_flags: Option<&RequestFlags>,
+    ) -> PyResult<Vec<Py<PyAny>>> {
+        let num_keys = keys.len();
+        if num_keys == 0 {
+            return Ok(Vec::new());
+        }
+
+        // Build all mg commands into one buffer (GIL held for key extraction)
+        let mut cmd_buf: Vec<u8> = Vec::with_capacity(num_keys * 64);
+        for i in 0..num_keys {
+            let key_obj = keys.get_item(i)?;
+            let cmd = self.build_cmd(b"mg", &key_obj, None, request_flags)?;
+            cmd_buf.extend_from_slice(&cmd.buf);
+        }
+
+        // Send all commands, then receive all responses (GIL released).
+        // Value data is copied to owned Vecs so buffer resets during
+        // subsequent reads don't invalidate earlier responses.
+        let io = &mut self.io;
+        let raw_responses: Vec<(ParsedHeader, Option<Vec<u8>>)> = py
+            .detach(|| {
+                send_all(io.fd, &cmd_buf, io.timeout_ms)?;
+                let mut responses = Vec::with_capacity(num_keys);
+                for _ in 0..num_keys {
+                    let header = io.get_header()?;
+                    let value = if header.response_type == Some(RESPONSE_VALUE) {
+                        let size = header.size.unwrap_or(0) as usize;
+                        let vd = io.ensure_value(size)?;
+                        Some(match vd {
+                            ValueData::InBuffer(start) => {
+                                // Convert to vector, as the buffer will be
+                                // reused and data will be overwritten
+                                io.buf[start..start + size].to_vec()
+                            }
+                            ValueData::Allocated(data) => data,
+                        })
+                    } else {
+                        None
+                    };
+                    responses.push((header, value));
+                }
+                Ok(responses)
+            })
+            .map_err(|e: std::io::Error| socket_err_io("Error in meta_multiget", e))?;
+
+        // Convert raw responses to Python objects (GIL held)
+        let mut results = Vec::with_capacity(num_keys);
+        for (header, value_bytes) in raw_responses {
+            let value_data = value_bytes.map(ValueData::Allocated);
+            results.push(self.make_response(py, header, value_data)?);
+        }
+        Ok(results)
     }
 }
