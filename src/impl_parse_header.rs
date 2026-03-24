@@ -1,3 +1,5 @@
+use memchr::memmem;
+
 use crate::{constants::*, ResponseFlags};
 
 pub fn impl_parse_header(
@@ -9,43 +11,32 @@ pub fn impl_parse_header(
         return None;
     }
     let end = end.min(data.len());
-    let mut n = start + 2;
-    while n < end - 1 {
-        if data[n] == b'\r' && data[n + 1] == b'\n' {
-            let endl_pos = n + 2;
-            match &data[start..start + 2] {
-                b"VA" => {
-                    match ResponseFlags::from_value_header(&data[start..n]) {
-                        Some((size, flags)) => {
-                            return Some((endl_pos, Some(RESPONSE_VALUE), Some(size), Some(flags)));
-                        }
-                        None => {
-                            return Some((endl_pos, None, None, None));
-                        }
-                    };
-                }
-                b"HD" | b"OK" => {
-                    let flags = ResponseFlags::from_success_header(&data[start..n]);
-                    return Some((endl_pos, Some(RESPONSE_SUCCESS), None, Some(flags)));
-                }
-                b"NS" => {
-                    return Some((endl_pos, Some(RESPONSE_NOT_STORED), None, None));
-                }
-                b"EX" => {
-                    return Some((endl_pos, Some(RESPONSE_CONFLICT), None, None));
-                }
-                b"EN" | b"NF" => {
-                    return Some((endl_pos, Some(RESPONSE_MISS), None, None));
-                }
-                b"MN" => {
-                    return Some((endl_pos, Some(RESPONSE_NOOP), None, None));
-                }
-                _ => {
-                    return Some((endl_pos, None, None, None));
-                }
-            }
-        }
-        n += 1;
+    let search_start = start + 2;
+    if search_start >= end {
+        return None;
     }
-    None
+    // Use memmem SIMD-accelerated search for \r\n
+    if let Some(pos) = memmem::find(&data[search_start..end], b"\r\n") {
+        let n = search_start + pos;
+        let endl_pos = n + 2;
+        match &data[start..start + 2] {
+            b"VA" => match ResponseFlags::from_value_header(&data[start..n]) {
+                Some((size, flags)) => {
+                    Some((endl_pos, Some(RESPONSE_VALUE), Some(size), Some(flags)))
+                }
+                None => Some((endl_pos, None, None, None)),
+            },
+            b"HD" | b"OK" => {
+                let flags = ResponseFlags::from_success_header(&data[start..n]);
+                Some((endl_pos, Some(RESPONSE_SUCCESS), None, Some(flags)))
+            }
+            b"NS" => Some((endl_pos, Some(RESPONSE_NOT_STORED), None, None)),
+            b"EX" => Some((endl_pos, Some(RESPONSE_CONFLICT), None, None)),
+            b"EN" | b"NF" => Some((endl_pos, Some(RESPONSE_MISS), None, None)),
+            b"MN" => Some((endl_pos, Some(RESPONSE_NOOP), None, None)),
+            _ => Some((endl_pos, None, None, None)),
+        }
+    } else {
+        None
+    }
 }

@@ -50,6 +50,7 @@ pub struct RequestFlags {
 
 impl RequestFlags {
     pub fn push_bytes(&self, buf: &mut Vec<u8>) {
+        let mut itoa_buf = itoa::Buffer::new();
         if self.no_reply {
             buf.push(b' ');
             buf.push(b'q');
@@ -97,42 +98,42 @@ impl RequestFlags {
         if let Some(v) = self.cache_ttl {
             buf.push(b' ');
             buf.push(b'T');
-            buf.extend_from_slice(&v.to_string().as_bytes());
+            buf.extend_from_slice(itoa_buf.format(v).as_bytes());
         }
         if let Some(v) = self.recache_ttl {
             buf.push(b' ');
             buf.push(b'R');
-            buf.extend_from_slice(&v.to_string().as_bytes());
+            buf.extend_from_slice(itoa_buf.format(v).as_bytes());
         }
         if let Some(v) = self.vivify_on_miss_ttl {
             buf.push(b' ');
             buf.push(b'N');
-            buf.extend_from_slice(&v.to_string().as_bytes());
+            buf.extend_from_slice(itoa_buf.format(v).as_bytes());
         }
         if let Some(v) = self.client_flag {
             buf.push(b' ');
             buf.push(b'F');
-            buf.extend_from_slice(&v.to_string().as_bytes());
+            buf.extend_from_slice(itoa_buf.format(v).as_bytes());
         }
         if let Some(v) = self.ma_initial_value {
             buf.push(b' ');
             buf.push(b'J');
-            buf.extend_from_slice(&v.to_string().as_bytes());
+            buf.extend_from_slice(itoa_buf.format(v).as_bytes());
         }
         if let Some(v) = self.ma_delta_value {
             buf.push(b' ');
             buf.push(b'D');
-            buf.extend_from_slice(&v.to_string().as_bytes());
+            buf.extend_from_slice(itoa_buf.format(v).as_bytes());
         }
         if let Some(v) = self.cas_token {
             buf.push(b' ');
             buf.push(b'C');
-            buf.extend_from_slice(&v.to_string().as_bytes());
+            buf.extend_from_slice(itoa_buf.format(v).as_bytes());
         }
         if let Some(v) = &self.opaque {
             buf.push(b' ');
             buf.push(b'O');
-            buf.extend_from_slice(&v);
+            buf.extend_from_slice(v);
         }
         if let Some(v) = self.mode {
             if v != SET_MODE_SET && v != MA_MODE_INC {
@@ -242,28 +243,7 @@ impl RequestFlags {
     }
 
     pub fn copy(&self) -> Self {
-        RequestFlags {
-            no_reply: self.no_reply,
-            return_client_flag: self.return_client_flag,
-            return_cas_token: self.return_cas_token,
-            return_value: self.return_value,
-            return_ttl: self.return_ttl,
-            return_size: self.return_size,
-            return_last_access: self.return_last_access,
-            return_fetched: self.return_fetched,
-            return_key: self.return_key,
-            no_update_lru: self.no_update_lru,
-            mark_stale: self.mark_stale,
-            cache_ttl: self.cache_ttl,
-            recache_ttl: self.recache_ttl,
-            vivify_on_miss_ttl: self.vivify_on_miss_ttl,
-            client_flag: self.client_flag,
-            ma_initial_value: self.ma_initial_value,
-            ma_delta_value: self.ma_delta_value,
-            cas_token: self.cas_token,
-            opaque: self.opaque.clone(),
-            mode: self.mode,
-        }
+        self.clone()
     }
 
     pub fn __str__(&self) -> String {
