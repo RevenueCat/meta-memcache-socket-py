@@ -3,7 +3,8 @@ use pyo3::types::PyBytes;
 
 use crate::{MA_MODE_INC, SET_MODE_SET};
 
-#[pyclass]
+#[pyclass(eq, skip_from_py_object)]
+#[derive(Clone, PartialEq)]
 pub struct RequestFlags {
     #[pyo3(get, set)]
     no_reply: bool,
@@ -265,29 +266,6 @@ impl RequestFlags {
         }
     }
 
-    pub fn __eq__(&self, other: &Self) -> bool {
-        self.no_reply == other.no_reply
-            && self.return_client_flag == other.return_client_flag
-            && self.return_cas_token == other.return_cas_token
-            && self.return_value == other.return_value
-            && self.return_ttl == other.return_ttl
-            && self.return_size == other.return_size
-            && self.return_last_access == other.return_last_access
-            && self.return_fetched == other.return_fetched
-            && self.return_key == other.return_key
-            && self.no_update_lru == other.no_update_lru
-            && self.mark_stale == other.mark_stale
-            && self.cache_ttl == other.cache_ttl
-            && self.recache_ttl == other.recache_ttl
-            && self.vivify_on_miss_ttl == other.vivify_on_miss_ttl
-            && self.client_flag == other.client_flag
-            && self.ma_initial_value == other.ma_initial_value
-            && self.ma_delta_value == other.ma_delta_value
-            && self.cas_token == other.cas_token
-            && self.opaque == other.opaque
-            && self.mode == other.mode
-    }
-
     pub fn __str__(&self) -> String {
         format!(
             "RequestFlags(no_reply={:?}, return_client_flag={:?}, return_cas_token={:?}, return_value={:?}, return_ttl={:?}, return_size={:?}, return_last_access={:?}, return_fetched={:?}, return_key={:?}, no_update_lru={:?}, mark_stale={:?}, cache_ttl={:?}, recache_ttl={:?}, vivify_on_miss_ttl={:?}, client_flag={:?}, ma_initial_value={:?}, ma_delta_value={:?}, cas_token={:?}, opaque={:?}, mode={:?})",
@@ -314,9 +292,9 @@ impl RequestFlags {
         )
     }
 
-    pub fn to_bytes(&self, py: Python) -> Py<PyBytes> {
-        let mut flags: Vec<u8> = Vec::new();
+    pub fn to_bytes<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        let mut flags: Vec<u8> = Vec::with_capacity(64);
         self.push_bytes(&mut flags);
-        PyBytes::new(py, &flags).into()
+        PyBytes::new(py, &flags)
     }
 }
