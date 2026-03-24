@@ -49,9 +49,16 @@ pub struct RequestFlags {
 }
 
 impl RequestFlags {
-    pub fn push_bytes(&self, buf: &mut Vec<u8>) {
+    /// Check if the no_reply flag is set (crate-internal use).
+    pub(crate) fn is_no_reply(&self) -> bool {
+        self.no_reply
+    }
+
+    pub fn push_bytes(&self, buf: &mut Vec<u8>, allow_no_reply_flag: bool) {
         let mut itoa_buf = itoa::Buffer::new();
-        if self.no_reply {
+        // allow_no_reply_flag controls whether the wire-level `q` flag is emitted
+        // for no_reply flag.
+        if allow_no_reply_flag && self.no_reply {
             buf.push(b' ');
             buf.push(b'q');
         }
@@ -276,7 +283,7 @@ impl RequestFlags {
 
     pub fn to_bytes<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
         let mut flags: Vec<u8> = Vec::with_capacity(64);
-        self.push_bytes(&mut flags);
+        self.push_bytes(&mut flags, /* allow_no_reply_flag */ true);
         PyBytes::new(py, &flags)
     }
 }

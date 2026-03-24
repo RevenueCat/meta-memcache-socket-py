@@ -5,13 +5,19 @@ use crate::RequestFlags;
 const MAX_KEY_LEN: usize = 250;
 const MAX_BIN_KEY_LEN: usize = 187; // 250 * 3 / 4 due to b64 encoding
 
+pub struct BuiltCmd {
+    pub buf: Vec<u8>,
+    pub no_reply: bool,
+}
+
 pub fn impl_build_cmd(
     cmd: &[u8],
     key: &[u8],
     size: Option<u32>,
     request_flags: Option<&RequestFlags>,
     legacy_size_format: bool,
-) -> Option<Vec<u8>> {
+    allow_no_reply_flag: bool,
+) -> Option<BuiltCmd> {
     if key.is_empty() || key.len() >= MAX_KEY_LEN {
         return None;
     }
@@ -55,10 +61,13 @@ pub fn impl_build_cmd(
         buf.push(b' ');
         buf.push(b'b');
     }
-    if let Some(request_flags) = request_flags {
-        request_flags.push_bytes(&mut buf);
-    }
+    let no_reply = if let Some(request_flags) = request_flags {
+        request_flags.push_bytes(&mut buf, allow_no_reply_flag);
+        allow_no_reply_flag && request_flags.is_no_reply()
+    } else {
+        false
+    };
     buf.push(b'\r');
     buf.push(b'\n');
-    Some(buf)
+    Some(BuiltCmd { buf, no_reply })
 }

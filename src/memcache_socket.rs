@@ -1,12 +1,17 @@
 use std::os::fd::RawFd;
 
+use log::warn;
+
 use pyo3::BoundObject;
-use pyo3::exceptions::{PyConnectionError, PyTimeoutError};
+use pyo3::exceptions::{PyConnectionError, PyTimeoutError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 
 use crate::constants::*;
+use crate::impl_build_cmd::{BuiltCmd, impl_build_cmd};
 use crate::impl_parse_header::{ParsedHeader, impl_parse_header};
+use crate::request_flags::RequestFlags;
+use crate::response_flags::ResponseFlags;
 use crate::response_types::*;
 
 const DEFAULT_BUFFER_SIZE: usize = 4096;
@@ -61,31 +66,33 @@ fn poll_fd(
     events: libc::c_short,
     timeout_ms: libc::c_int,
 ) -> Result<(), std::io::Error> {
-    let mut pfd = libc::pollfd {
-        fd,
-        events,
-        revents: 0,
-    };
-    // SAFETY: pfd is a valid pollfd struct on the stack, nfds=1
-    let ret = unsafe { libc::poll(&mut pfd, 1, timeout_ms) };
-    if ret < 0 {
-        let err = std::io::Error::last_os_error();
-        if err.kind() == std::io::ErrorKind::Interrupted {
-            return poll_fd(fd, events, timeout_ms); // signal interrupted us, retry
+    loop {
+        let mut pfd = libc::pollfd {
+            fd,
+            events,
+            revents: 0,
+        };
+        // SAFETY: pfd is a valid pollfd struct on the stack, nfds=1
+        let ret = unsafe { libc::poll(&mut pfd, 1, timeout_ms) };
+        if ret < 0 {
+            let err = std::io::Error::last_os_error();
+            if err.kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(err);
+        } else if ret == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "timed out",
+            ));
+        } else if pfd.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::ConnectionReset,
+                "poll error on socket",
+            ));
+        } else {
+            return Ok(());
         }
-        Err(err)
-    } else if ret == 0 {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::TimedOut,
-            "timed out",
-        ))
-    } else if pfd.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::ConnectionReset,
-            "poll error on socket",
-        ))
-    } else {
-        Ok(())
     }
 }
 
@@ -122,28 +129,25 @@ fn send_all(fd: RawFd, data: &[u8], timeout_ms: libc::c_int) -> Result<(), std::
     Ok(())
 }
 
-/// Send data + NOOP command in a single write when possible.
-/// Uses writev() to avoid concatenation on the happy path, falls back
-/// to send_all() for partial writes and EAGAIN.
+/// Send multiple buffers in a single writev() syscall.
+/// Falls back to send_all() for partial writes.
 #[inline]
-fn send_all_with_noop(
-    fd: RawFd,
-    data: &[u8],
-    timeout_ms: libc::c_int,
-) -> Result<(), std::io::Error> {
-    let iov = [
-        libc::iovec {
-            iov_base: data.as_ptr() as *mut libc::c_void,
-            iov_len: data.len(),
-        },
-        libc::iovec {
-            iov_base: NOOP_CMD.as_ptr() as *mut libc::c_void,
-            iov_len: NOOP_CMD.len(),
-        },
-    ];
-    // SAFETY: iov array has 2 valid entries pointing to data and NOOP_CMD
-    let n = unsafe { libc::writev(fd, iov.as_ptr(), 2) };
-    let total_len = data.len() + NOOP_CMD.len();
+fn send_iovecs(fd: RawFd, slices: &[&[u8]], timeout_ms: libc::c_int) -> Result<(), std::io::Error> {
+    let total_len: usize = slices.iter().map(|s| s.len()).sum();
+    if total_len == 0 {
+        return Ok(());
+    }
+
+    let mut iovecs: Vec<libc::iovec> = Vec::with_capacity(slices.len());
+    for slice in slices {
+        iovecs.push(libc::iovec {
+            iov_base: slice.as_ptr() as *mut libc::c_void,
+            iov_len: slice.len(),
+        });
+    }
+
+    // SAFETY: iovecs entries point to valid byte slices for the duration of writev
+    let n = unsafe { libc::writev(fd, iovecs.as_ptr(), iovecs.len() as i32) };
     let written = if n >= 0 {
         n as usize
     } else {
@@ -153,11 +157,23 @@ fn send_all_with_noop(
             _ => return Err(err),
         }
     };
-    if written < total_len {
-        let combined: Vec<u8> = [data, NOOP_CMD].concat();
-        send_all(fd, &combined[written..], timeout_ms)?;
+
+    if written >= total_len {
+        return Ok(());
     }
-    Ok(())
+
+    // Partial write: concatenate remaining and send_all
+    let mut combined: Vec<u8> = Vec::with_capacity(total_len - written);
+    let mut skip = written;
+    for slice in slices {
+        if skip >= slice.len() {
+            skip -= slice.len();
+        } else {
+            combined.extend_from_slice(&slice[skip..]);
+            skip = 0;
+        }
+    }
+    send_all(fd, &combined, timeout_ms)
 }
 
 /// Recv into buffer slice, returns bytes read. Handles EAGAIN by polling.
@@ -215,10 +231,16 @@ fn recv_fill(fd: RawFd, buf: &mut [u8], timeout_ms: libc::c_int) -> Result<usize
 
 /// Where the value data ended up after recv.
 enum ValueData {
-    /// Value is in io.buf[pos..pos+size], ENDL validated. Caller advances pos.
-    InBuffer,
+    /// Value is in io.buf starting at this position, for `size` bytes.
+    /// pos has already been advanced past the value and ENDL.
+    InBuffer(usize),
     /// Value was too large for the buffer, stored in this Vec.
     Allocated(Vec<u8>),
+}
+
+enum CmdResult {
+    NoReply,
+    Response((ParsedHeader, Option<ValueData>)),
 }
 
 /// Inner I/O state — no Python objects, so it is Send/Ungil.
@@ -255,7 +277,7 @@ impl SocketIO {
     }
 
     fn get_single_header(&mut self) -> Result<ParsedHeader, std::io::Error> {
-        if self.pos >= self.read {
+        if self.read == self.pos {
             self.read = 0;
             self.pos = 0;
         } else if self.pos > self.reset_buffer_size {
@@ -296,19 +318,36 @@ impl SocketIO {
         self.get_single_header()
     }
 
-    fn sendall_impl(&self, data: &[u8], with_noop: bool) -> Result<(), std::io::Error> {
+    fn send_cmd(&mut self, cmd: &[u8], with_noop: bool) -> Result<(), std::io::Error> {
         if with_noop {
-            send_all_with_noop(self.fd, data, self.timeout_ms)
+            send_iovecs(self.fd, &[cmd, NOOP_CMD], self.timeout_ms)?;
+            self.noop_expected += 1;
         } else {
-            send_all(self.fd, data, self.timeout_ms)
+            send_all(self.fd, cmd, self.timeout_ms)?;
         }
+        Ok(())
+    }
+
+    fn send_cmd_with_value(
+        &mut self,
+        cmd: &[u8],
+        value: &[u8],
+        with_noop: bool,
+    ) -> Result<(), std::io::Error> {
+        if with_noop {
+            send_iovecs(self.fd, &[cmd, value, ENDL, NOOP_CMD], self.timeout_ms)?;
+            self.noop_expected += 1;
+        } else {
+            send_iovecs(self.fd, &[cmd, value, ENDL], self.timeout_ms)?;
+        }
+        Ok(())
     }
 
     /// Ensure value data is available for reading.
+    /// Advances pos past the value and ENDL on success.
     ///
-    /// For the common case (value fits in buffer), returns InBuffer —
-    /// the data is at buf[pos..pos+size] with ENDL validated.
-    /// The caller creates PyBytes directly from the buffer slice (zero-copy to Rust).
+    /// For the common case (value fits in buffer), returns InBuffer(start) —
+    /// the data is at buf[start..start+size].
     ///
     /// For large values exceeding the buffer, returns Allocated with the data.
     fn ensure_value(&mut self, size: usize) -> Result<ValueData, std::io::Error> {
@@ -327,21 +366,23 @@ impl SocketIO {
             data_in_buf = self.read - self.pos;
         }
 
+        let data_start = self.pos;
+
         if data_in_buf >= message_size {
             // Value + ENDL fully in buffer — validate ENDL in place
-            let data_end = self.pos + size;
+            let data_end = data_start + size;
             if self.buf[data_end] != b'\r' || self.buf[data_end + 1] != b'\n' {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     "Value not terminated with \\r\\n",
                 ));
             }
-            // Don't advance pos yet — caller reads buf[pos..pos+size] then advances
-            Ok(ValueData::InBuffer)
+            self.pos = data_end + ENDL_LEN;
+            Ok(ValueData::InBuffer(data_start))
         } else if data_in_buf >= size {
             // Value in buffer but ENDL partially/not in buffer.
-            // We still return InBuffer, but need to read+validate the ENDL.
-            let data_end = self.pos + size;
+            // Read and validate the ENDL from buffer/socket.
+            let data_end = data_start + size;
             let endl_in_buf = data_in_buf - size;
             let mut endl_buf = [0u8; ENDL_LEN];
             if endl_in_buf > 0 {
@@ -356,11 +397,9 @@ impl SocketIO {
                     "Value not terminated with \\r\\n",
                 ));
             }
-            // Discard partial ENDL bytes from the buffer's tracked range.
-            // The caller will advance pos by size + ENDL_LEN, which will
-            // overshoot read — get_single_header handles this via pos >= read.
-            self.read = data_end;
-            Ok(ValueData::InBuffer)
+            // ENDL was consumed from buffer/socket directly; buffer is fully consumed
+            self.pos = self.read;
+            Ok(ValueData::InBuffer(data_start))
         } else {
             // Value doesn't fit in buffer — allocate and read into temp buffer
             let mut message = vec![0u8; message_size];
@@ -379,6 +418,21 @@ impl SocketIO {
             Ok(ValueData::Allocated(message))
         }
     }
+
+    /// Read and parse the next response header, including value data for
+    /// Value responses. All socket I/O happens in this method (no GIL needed).
+    fn get_response_with_value(
+        &mut self,
+    ) -> Result<(ParsedHeader, Option<ValueData>), std::io::Error> {
+        let header = self.get_header()?;
+        let value_data = if header.response_type == Some(RESPONSE_VALUE) {
+            let size = header.size.unwrap_or(0) as usize;
+            Some(self.ensure_value(size)?)
+        } else {
+            None
+        };
+        Ok((header, value_data))
+    }
 }
 
 #[pyclass]
@@ -387,6 +441,87 @@ pub struct MemcacheSocket {
     /// Hold a reference to the Python socket to prevent GC.
     _conn: Py<PyAny>,
     version: u8,
+}
+
+/// Private helpers
+impl MemcacheSocket {
+    fn build_cmd(
+        &self,
+        cmd: &[u8],
+        key: &[u8],
+        size: Option<u32>,
+        request_flags: Option<&RequestFlags>,
+    ) -> Option<BuiltCmd> {
+        let legacy_size_format = cmd == b"ms" && self.version == SERVER_VERSION_AWS_1_6_6;
+        let allow_no_reply_flag = cmd != b"mg";
+        impl_build_cmd(
+            cmd,
+            key,
+            size,
+            request_flags,
+            legacy_size_format,
+            allow_no_reply_flag,
+        )
+    }
+
+    /// Convert a parsed header + optional value data into a Python response object.
+    fn make_response(
+        &self,
+        py: Python<'_>,
+        header: ParsedHeader,
+        value_data: Option<ValueData>,
+    ) -> PyResult<Py<PyAny>> {
+        match header.response_type {
+            Some(RESPONSE_VALUE) => {
+                let size = header
+                    .size
+                    .ok_or_else(|| socket_err("Value response missing size"))?;
+                let flags = header
+                    .flags
+                    .ok_or_else(|| socket_err("Value response missing flags"))?;
+                let py_bytes = match value_data {
+                    Some(ValueData::InBuffer(start)) => {
+                        PyBytes::new(py, &self.io.buf[start..start + size as usize])
+                    }
+                    Some(ValueData::Allocated(data)) => PyBytes::new(py, &data),
+                    None => PyBytes::new(py, b""),
+                };
+                into_py(
+                    py,
+                    Value::new(size, flags, Some(py_bytes.into_any().unbind())),
+                )
+            }
+            Some(RESPONSE_SUCCESS) => {
+                let flags = header
+                    .flags
+                    .ok_or_else(|| socket_err("Success response missing flags"))?;
+                into_py(py, Success::new(flags))
+            }
+            Some(RESPONSE_NOT_STORED) => into_py(py, NotStored::new()),
+            Some(RESPONSE_CONFLICT) => into_py(py, Conflict::new()),
+            Some(RESPONSE_MISS) => into_py(py, Miss::new()),
+            _ => Err(socket_err(&format!(
+                "Unknown response code: {:?}",
+                header.response_type
+            ))),
+        }
+    }
+
+    /// Create a Success response with empty flags (for no_reply commands).
+    fn success_no_reply(py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let flags = ResponseFlags {
+            cas_token: None,
+            fetched: None,
+            last_access: None,
+            ttl: None,
+            client_flag: None,
+            win: None,
+            stale: false,
+            size: None,
+            opaque: None,
+        };
+        into_py(py, Success::new(flags))
+    }
 }
 
 #[pymethods]
@@ -410,9 +545,11 @@ impl MemcacheSocket {
             )
         };
         if ret != 0 {
-            // Non-fatal: log would be ideal but we don't have a logger here.
-            // The socket will still work with the kernel default buffer size.
-            let _ = ret;
+            // Non-fatal: the socket will still work with the kernel default buffer size.
+            warn!(
+                "SO_RCVBUF setsockopt failed (fd={}, requested={}), using kernel default",
+                fd, buffer_size
+            );
         }
 
         Ok(MemcacheSocket {
@@ -458,79 +595,231 @@ impl MemcacheSocket {
         Ok(())
     }
 
-    /// Send data to the socket, optionally appending a NOOP command.
+    // -----------------------------------------------------------------------
+    // Low-level: sendall + get_response
+    // -----------------------------------------------------------------------
+
+    /// Send raw data to the socket, optionally appending a NOOP command.
     /// Releases the GIL during socket I/O.
     pub fn sendall(&mut self, py: Python<'_>, data: &[u8], with_noop: bool) -> PyResult<()> {
         let io = &mut self.io;
-        py.detach(|| io.sendall_impl(data, with_noop))
+        py.detach(|| io.send_cmd(data, with_noop))
             .map_err(|e| socket_err_io("Error sending data", e))?;
-        if with_noop {
-            self.io.noop_expected += 1;
-        }
         Ok(())
     }
 
-    /// Read and parse the next response header.
-    /// Releases the GIL during socket I/O and header parsing.
+    /// Read and parse the next response, including value data for Value responses.
+    /// For Value responses, `.value` is set to the raw bytes from the wire.
+    /// Releases the GIL during socket I/O.
     pub fn get_response(&mut self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let io = &mut self.io;
-        let header = py
-            .detach(|| io.get_header())
-            .map_err(|e| socket_err_io("Error reading header", e))?;
+        let (header, value_data) = py
+            .detach(|| io.get_response_with_value())
+            .map_err(|e| socket_err_io("Error reading response", e))?;
+        self.make_response(py, header, value_data)
+    }
 
-        match header.response_type {
-            Some(RESPONSE_VALUE) => {
-                let size = header
-                    .size
-                    .ok_or_else(|| socket_err("Value response missing size"))?;
-                let flags = header
-                    .flags
-                    .ok_or_else(|| socket_err("Value response missing flags"))?;
-                into_py(py, Value::new(size, flags, None))
-            }
-            Some(RESPONSE_SUCCESS) => {
-                let flags = header
-                    .flags
-                    .ok_or_else(|| socket_err("Success response missing flags"))?;
-                into_py(py, Success::new(flags))
-            }
-            Some(RESPONSE_NOT_STORED) => into_py(py, NotStored::new()),
-            Some(RESPONSE_CONFLICT) => into_py(py, Conflict::new()),
-            Some(RESPONSE_MISS) => into_py(py, Miss::new()),
-            _ => Err(socket_err(&format!(
-                "Unknown response code: {:?}",
-                header.response_type
-            ))),
+    // -----------------------------------------------------------------------
+    // Tier 1: send_meta_* (for pipelining — send only, read later)
+    // -----------------------------------------------------------------------
+
+    /// Send a meta get command. Use get_response() to read the result later.
+    /// Note: no_reply on mg only suppresses misses, hits still return data,
+    /// so noop is never injected for get commands.
+    #[pyo3(signature = (key, request_flags=None))]
+    pub fn send_meta_get(
+        &mut self,
+        py: Python<'_>,
+        key: &[u8],
+        request_flags: Option<&RequestFlags>,
+    ) -> PyResult<()> {
+        let cmd = self
+            .build_cmd(b"mg", key, None, request_flags)
+            .ok_or_else(|| PyValueError::new_err("Key is too long or empty"))?;
+        if cmd.no_reply {
+            return Err(socket_err(
+                "internal error: build_cmd produced no_reply=true for mg command",
+            ));
+        }
+        let io = &mut self.io;
+        py.detach(|| io.send_cmd(&cmd.buf, false))
+            .map_err(|e| socket_err_io("Error sending meta get", e))?;
+        Ok(())
+    }
+
+    /// Send a meta set command with value. Use get_response() to read the result later.
+    /// Uses writev() to send cmd + value + ENDL in a single syscall (zero concatenation).
+    /// If no_reply is set, automatically appends a NOOP command.
+    #[pyo3(signature = (key, value, request_flags=None))]
+    pub fn send_meta_set(
+        &mut self,
+        py: Python<'_>,
+        key: &[u8],
+        value: &[u8],
+        request_flags: Option<&RequestFlags>,
+    ) -> PyResult<()> {
+        let cmd = self
+            .build_cmd(b"ms", key, Some(value.len() as u32), request_flags)
+            .ok_or_else(|| PyValueError::new_err("Key is too long or empty"))?;
+        let io = &mut self.io;
+        py.detach(|| io.send_cmd_with_value(&cmd.buf, value, cmd.no_reply))
+            .map_err(|e| socket_err_io("Error sending meta set", e))?;
+        Ok(())
+    }
+
+    /// Send a meta delete command. Use get_response() to read the result later.
+    /// If no_reply is set, automatically appends a NOOP command.
+    #[pyo3(signature = (key, request_flags=None))]
+    pub fn send_meta_delete(
+        &mut self,
+        py: Python<'_>,
+        key: &[u8],
+        request_flags: Option<&RequestFlags>,
+    ) -> PyResult<()> {
+        let cmd = self
+            .build_cmd(b"md", key, None, request_flags)
+            .ok_or_else(|| PyValueError::new_err("Key is too long or empty"))?;
+        let io = &mut self.io;
+        py.detach(|| io.send_cmd(&cmd.buf, cmd.no_reply))
+            .map_err(|e| socket_err_io("Error sending meta delete", e))?;
+        Ok(())
+    }
+
+    /// Send a meta arithmetic command. Use get_response() to read the result later.
+    /// If no_reply is set, automatically appends a NOOP command.
+    #[pyo3(signature = (key, request_flags=None))]
+    pub fn send_meta_arithmetic(
+        &mut self,
+        py: Python<'_>,
+        key: &[u8],
+        request_flags: Option<&RequestFlags>,
+    ) -> PyResult<()> {
+        let cmd = self
+            .build_cmd(b"ma", key, None, request_flags)
+            .ok_or_else(|| PyValueError::new_err("Key is too long or empty"))?;
+        let io = &mut self.io;
+        py.detach(|| io.send_cmd(&cmd.buf, cmd.no_reply))
+            .map_err(|e| socket_err_io("Error sending meta arithmetic", e))?;
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Tier 2: meta_* (blocking — send + recv in one call)
+    // -----------------------------------------------------------------------
+
+    /// Send a meta get command and return the response.
+    /// The entire send + recv happens in a single GIL-released block.
+    #[pyo3(signature = (key, request_flags=None))]
+    pub fn meta_get(
+        &mut self,
+        py: Python<'_>,
+        key: &[u8],
+        request_flags: Option<&RequestFlags>,
+    ) -> PyResult<Py<PyAny>> {
+        let cmd = self
+            .build_cmd(b"mg", key, None, request_flags)
+            .ok_or_else(|| PyValueError::new_err("Key is too long or empty"))?;
+        if cmd.no_reply {
+            return Err(socket_err(
+                "internal error: build_cmd produced no_reply=true for mg command",
+            ));
+        }
+        let io = &mut self.io;
+        let (header, value_data) = py
+            .detach(|| {
+                io.send_cmd(&cmd.buf, false)?;
+                io.get_response_with_value()
+            })
+            .map_err(|e| socket_err_io("Error in meta_get", e))?;
+        self.make_response(py, header, value_data)
+    }
+
+    /// Send a meta set command with value and return the response.
+    /// For no_reply commands, sends with NOOP and returns Success immediately.
+    /// Otherwise, the entire send + recv happens in a single GIL-released block.
+    #[pyo3(signature = (key, value, request_flags=None))]
+    pub fn meta_set(
+        &mut self,
+        py: Python<'_>,
+        key: &[u8],
+        value: &[u8],
+        request_flags: Option<&RequestFlags>,
+    ) -> PyResult<Py<PyAny>> {
+        let cmd = self
+            .build_cmd(b"ms", key, Some(value.len() as u32), request_flags)
+            .ok_or_else(|| PyValueError::new_err("Key is too long or empty"))?;
+        let io = &mut self.io;
+        let result = py
+            .detach(|| {
+                io.send_cmd_with_value(&cmd.buf, value, cmd.no_reply)?;
+                if cmd.no_reply {
+                    Ok(CmdResult::NoReply)
+                } else {
+                    Ok(CmdResult::Response(io.get_response_with_value()?))
+                }
+            })
+            .map_err(|e| socket_err_io("Error in meta_set", e))?;
+        match result {
+            CmdResult::NoReply => Self::success_no_reply(py),
+            CmdResult::Response((header, value_data)) => self.make_response(py, header, value_data),
         }
     }
 
-    /// Read value data from the socket.
-    /// Releases the GIL during socket I/O.
-    /// For the common case (value fits in buffer), creates PyBytes directly
-    /// from the buffer — no intermediate allocation.
-    pub fn get_value<'py>(&mut self, py: Python<'py>, size: u32) -> PyResult<Bound<'py, PyBytes>> {
-        let size_usize = size as usize;
+    /// Send a meta delete command and return the response.
+    /// For no_reply commands, sends with NOOP and returns Success immediately.
+    #[pyo3(signature = (key, request_flags=None))]
+    pub fn meta_delete(
+        &mut self,
+        py: Python<'_>,
+        key: &[u8],
+        request_flags: Option<&RequestFlags>,
+    ) -> PyResult<Py<PyAny>> {
+        let cmd = self
+            .build_cmd(b"md", key, None, request_flags)
+            .ok_or_else(|| PyValueError::new_err("Key is too long or empty"))?;
         let io = &mut self.io;
+        let result = py
+            .detach(|| {
+                io.send_cmd(&cmd.buf, cmd.no_reply)?;
+                if cmd.no_reply {
+                    Ok(CmdResult::NoReply)
+                } else {
+                    Ok(CmdResult::Response(io.get_response_with_value()?))
+                }
+            })
+            .map_err(|e| socket_err_io("Error in meta_delete", e))?;
+        match result {
+            CmdResult::NoReply => Self::success_no_reply(py),
+            CmdResult::Response((header, value_data)) => self.make_response(py, header, value_data),
+        }
+    }
 
-        // Phase 1: recv data without GIL
-        let location = py
-            .detach(|| io.ensure_value(size_usize))
-            .map_err(|e| socket_err_io("Error receiving value", e))?;
-
-        // Phase 2: create PyBytes with GIL
-        match location {
-            ValueData::InBuffer => {
-                // Common path: value is in io.buf — create PyBytes directly, no extra alloc
-                let data_start = self.io.pos;
-                let data_end = data_start + size_usize;
-                let result = PyBytes::new(py, &self.io.buf[data_start..data_end]);
-                self.io.pos = data_end + ENDL_LEN;
-                Ok(result)
-            }
-            ValueData::Allocated(data) => {
-                // Large value path: data already in Vec, create PyBytes from it
-                Ok(PyBytes::new(py, &data))
-            }
+    /// Send a meta arithmetic command and return the response.
+    /// For no_reply commands, sends with NOOP and returns Success immediately.
+    #[pyo3(signature = (key, request_flags=None))]
+    pub fn meta_arithmetic(
+        &mut self,
+        py: Python<'_>,
+        key: &[u8],
+        request_flags: Option<&RequestFlags>,
+    ) -> PyResult<Py<PyAny>> {
+        let cmd = self
+            .build_cmd(b"ma", key, None, request_flags)
+            .ok_or_else(|| PyValueError::new_err("Key is too long or empty"))?;
+        let io = &mut self.io;
+        let result = py
+            .detach(|| {
+                io.send_cmd(&cmd.buf, cmd.no_reply)?;
+                if cmd.no_reply {
+                    Ok(CmdResult::NoReply)
+                } else {
+                    Ok(CmdResult::Response(io.get_response_with_value()?))
+                }
+            })
+            .map_err(|e| socket_err_io("Error in meta_arithmetic", e))?;
+        match result {
+            CmdResult::NoReply => Self::success_no_reply(py),
+            CmdResult::Response((header, value_data)) => self.make_response(py, header, value_data),
         }
     }
 }
