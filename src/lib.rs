@@ -28,6 +28,7 @@ use pyo3::types::PyBytes;
     ),
     text_signature = "(buffer: Union[memoryview, bytearray], start: int, end: int)",
 )]
+#[allow(clippy::type_complexity)]
 pub fn parse_header(
     buffer: PyBuffer<u8>,
     start: usize,
@@ -38,8 +39,9 @@ pub fn parse_header(
             "End must be less than buffer length",
         ));
     }
+    // SAFETY: PyBuffer guarantees buf_ptr() is valid and len_bytes() is accurate
     let data = unsafe { slice::from_raw_parts(buffer.buf_ptr() as *const u8, buffer.len_bytes()) };
-    Ok(impl_parse_header(data, start, end))
+    Ok(impl_parse_header(data, start, end).map(|h| (h.end_pos, h.response_type, h.size, h.flags)))
 }
 
 #[pyfunction]
@@ -147,7 +149,7 @@ pub fn build_meta_arithmetic<'py>(
     }
 }
 
-#[pymodule]
+#[pymodule(gil_used = false)]
 fn meta_memcache_socket(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<ResponseFlags>()?;
     module.add_class::<RequestFlags>()?;

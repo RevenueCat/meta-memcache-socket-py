@@ -4,7 +4,7 @@ use pyo3::types::PyBytes;
 use crate::{MA_MODE_INC, SET_MODE_SET};
 
 #[pyclass(eq, skip_from_py_object)]
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RequestFlags {
     #[pyo3(get, set)]
     no_reply: bool,
@@ -135,13 +135,14 @@ impl RequestFlags {
             buf.push(b'O');
             buf.extend_from_slice(v);
         }
-        if let Some(v) = self.mode {
-            if v != SET_MODE_SET && v != MA_MODE_INC {
-                // Set/inc are the default, no need to send them
-                buf.push(b' ');
-                buf.push(b'M');
-                buf.push(v);
-            }
+        if let Some(v) = self.mode
+            && v != SET_MODE_SET
+            && v != MA_MODE_INC
+        {
+            // Set/inc are the default, no need to send them
+            buf.push(b' ');
+            buf.push(b'M');
+            buf.push(v);
         }
     }
 }
@@ -149,6 +150,7 @@ impl RequestFlags {
 #[pymethods]
 impl RequestFlags {
     #[new]
+    #[allow(clippy::too_many_arguments)]
     #[pyo3(
         signature = (
             /,

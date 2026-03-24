@@ -14,7 +14,7 @@ fn find_space_or_end(header: &[u8], start: usize) -> usize {
 fn get_u32_value(header: &[u8], start: usize) -> (Option<u32>, usize) {
     match u32::from_radix_10_checked(&header[start..]) {
         (Some(v), len) if len > 0 => (Some(v), start + len),
-        _ => (None, find_space_or_end(&header, start)),
+        _ => (None, find_space_or_end(header, start)),
     }
 }
 
@@ -22,12 +22,12 @@ fn get_u32_value(header: &[u8], start: usize) -> (Option<u32>, usize) {
 fn get_i32_value(header: &[u8], start: usize) -> (Option<i32>, usize) {
     match i32::from_radix_10_checked(&header[start..]) {
         (Some(v), len) if len > 0 => (Some(v), start + len),
-        _ => (None, find_space_or_end(&header, start)),
+        _ => (None, find_space_or_end(header, start)),
     }
 }
 
-#[pyclass(frozen, eq, skip_from_py_object)]
-#[derive(Clone, PartialEq)]
+#[pyclass(frozen, eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ResponseFlags {
     #[pyo3(get)]
     pub cas_token: Option<u32>,
@@ -52,6 +52,7 @@ pub struct ResponseFlags {
 #[pymethods]
 impl ResponseFlags {
     #[new]
+    #[allow(clippy::too_many_arguments)]
     #[pyo3(
         signature = (
             /,
@@ -118,7 +119,7 @@ impl ResponseFlags {
 
     #[staticmethod]
     pub fn from_success_header(header: &[u8]) -> Self {
-        return ResponseFlags::parse_flags(header, 3);
+        ResponseFlags::parse_flags(header, 3)
     }
 
     #[staticmethod]
@@ -127,7 +128,6 @@ impl ResponseFlags {
         if header.len() < size_start + 1 {
             return None;
         }
-        // let (size, pos) = u32::from_radix_10_checked(&header[size_start..]);
         match u32::from_radix_10_checked(&header[size_start..]) {
             (Some(size), pos) if pos > 0 => {
                 let flags = ResponseFlags::parse_flags(header, size_start + pos);
@@ -161,7 +161,7 @@ impl ResponseFlags {
                 }
                 b'c' => {
                     // cas_token flag (u32)
-                    (cas_token, n) = get_u32_value(&header, n);
+                    (cas_token, n) = get_u32_value(header, n);
                 }
                 b'h' => {
                     // fetched flag (bool) encoded as 1 or 0
@@ -170,24 +170,24 @@ impl ResponseFlags {
                         b'0' => Some(false),
                         _ => None,
                     };
-                    n = find_space_or_end(&header, n + 1);
+                    n = find_space_or_end(header, n + 1);
                 }
                 b'l' => {
                     // last_access flag (u32)
-                    (last_access, n) = get_u32_value(&header, n);
+                    (last_access, n) = get_u32_value(header, n);
                 }
                 b't' => {
                     // ttl flag (i32) encoded as -1 (for no ttl) or a positive number
                     if n < header.len() && header[n] == b'-' {
                         ttl = Some(-1);
-                        n = find_space_or_end(&header, n)
+                        n = find_space_or_end(header, n)
                     } else {
-                        (ttl, n) = get_i32_value(&header, n);
+                        (ttl, n) = get_i32_value(header, n);
                     }
                 }
                 b'f' => {
                     // client_flag flag (u32)
-                    (client_flag, n) = get_u32_value(&header, n);
+                    (client_flag, n) = get_u32_value(header, n);
                 }
                 b'W' => {
                     // win flag (bool), no value
@@ -203,17 +203,17 @@ impl ResponseFlags {
                 }
                 b's' => {
                     // size flag (u32)
-                    (size, n) = get_u32_value(&header, n);
+                    (size, n) = get_u32_value(header, n);
                 }
                 b'O' => {
                     // opaque flag (bytes)
                     let start = n;
-                    n = find_space_or_end(&header, start);
+                    n = find_space_or_end(header, start);
                     opaque = Some(header[start..n].to_vec());
                 }
                 _ => {
                     // Unknown flag, skip it
-                    n = find_space_or_end(&header, n);
+                    n = find_space_or_end(header, n);
                 }
             }
             // n points now to a space, so continue past it
