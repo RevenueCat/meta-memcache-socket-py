@@ -8,6 +8,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 
 use crate::constants::*;
+use crate::encode_key::extract_key;
 use crate::impl_build_cmd::{BuiltCmd, impl_build_cmd};
 use crate::impl_parse_header::{ParsedHeader, impl_parse_header};
 use crate::request_flags::RequestFlags;
@@ -445,13 +446,14 @@ pub struct MemcacheSocket {
 
 /// Private helpers
 impl MemcacheSocket {
-    fn build_cmd(
+    fn build_cmd<'py>(
         &self,
         cmd: &[u8],
-        key: &[u8],
+        key: &'py Bound<'py, PyAny>,
         size: Option<u32>,
         request_flags: Option<&RequestFlags>,
-    ) -> Option<BuiltCmd> {
+    ) -> PyResult<BuiltCmd> {
+        let key = extract_key(key)?;
         let legacy_size_format = cmd == b"ms" && self.version == SERVER_VERSION_AWS_1_6_6;
         let allow_no_reply_flag = cmd != b"mg";
         impl_build_cmd(
@@ -462,6 +464,7 @@ impl MemcacheSocket {
             legacy_size_format,
             allow_no_reply_flag,
         )
+        .ok_or_else(|| PyValueError::new_err("Key is empty"))
     }
 
     /// Convert a parsed header + optional value data into a Python response object.
@@ -630,12 +633,10 @@ impl MemcacheSocket {
     pub fn send_meta_get(
         &mut self,
         py: Python<'_>,
-        key: &[u8],
+        key: &Bound<'_, PyAny>,
         request_flags: Option<&RequestFlags>,
     ) -> PyResult<()> {
-        let cmd = self
-            .build_cmd(b"mg", key, None, request_flags)
-            .ok_or_else(|| PyValueError::new_err("Key is too long or empty"))?;
+        let cmd = self.build_cmd(b"mg", key, None, request_flags)?;
         if cmd.no_reply {
             return Err(socket_err(
                 "internal error: build_cmd produced no_reply=true for mg command",
@@ -654,13 +655,11 @@ impl MemcacheSocket {
     pub fn send_meta_set(
         &mut self,
         py: Python<'_>,
-        key: &[u8],
+        key: &Bound<'_, PyAny>,
         value: &[u8],
         request_flags: Option<&RequestFlags>,
     ) -> PyResult<()> {
-        let cmd = self
-            .build_cmd(b"ms", key, Some(value.len() as u32), request_flags)
-            .ok_or_else(|| PyValueError::new_err("Key is too long or empty"))?;
+        let cmd = self.build_cmd(b"ms", key, Some(value.len() as u32), request_flags)?;
         let io = &mut self.io;
         py.detach(|| io.send_cmd_with_value(&cmd.buf, value, cmd.no_reply))
             .map_err(|e| socket_err_io("Error sending meta set", e))?;
@@ -673,12 +672,10 @@ impl MemcacheSocket {
     pub fn send_meta_delete(
         &mut self,
         py: Python<'_>,
-        key: &[u8],
+        key: &Bound<'_, PyAny>,
         request_flags: Option<&RequestFlags>,
     ) -> PyResult<()> {
-        let cmd = self
-            .build_cmd(b"md", key, None, request_flags)
-            .ok_or_else(|| PyValueError::new_err("Key is too long or empty"))?;
+        let cmd = self.build_cmd(b"md", key, None, request_flags)?;
         let io = &mut self.io;
         py.detach(|| io.send_cmd(&cmd.buf, cmd.no_reply))
             .map_err(|e| socket_err_io("Error sending meta delete", e))?;
@@ -691,12 +688,10 @@ impl MemcacheSocket {
     pub fn send_meta_arithmetic(
         &mut self,
         py: Python<'_>,
-        key: &[u8],
+        key: &Bound<'_, PyAny>,
         request_flags: Option<&RequestFlags>,
     ) -> PyResult<()> {
-        let cmd = self
-            .build_cmd(b"ma", key, None, request_flags)
-            .ok_or_else(|| PyValueError::new_err("Key is too long or empty"))?;
+        let cmd = self.build_cmd(b"ma", key, None, request_flags)?;
         let io = &mut self.io;
         py.detach(|| io.send_cmd(&cmd.buf, cmd.no_reply))
             .map_err(|e| socket_err_io("Error sending meta arithmetic", e))?;
@@ -713,12 +708,10 @@ impl MemcacheSocket {
     pub fn meta_get(
         &mut self,
         py: Python<'_>,
-        key: &[u8],
+        key: &Bound<'_, PyAny>,
         request_flags: Option<&RequestFlags>,
     ) -> PyResult<Py<PyAny>> {
-        let cmd = self
-            .build_cmd(b"mg", key, None, request_flags)
-            .ok_or_else(|| PyValueError::new_err("Key is too long or empty"))?;
+        let cmd = self.build_cmd(b"mg", key, None, request_flags)?;
         if cmd.no_reply {
             return Err(socket_err(
                 "internal error: build_cmd produced no_reply=true for mg command",
@@ -741,13 +734,11 @@ impl MemcacheSocket {
     pub fn meta_set(
         &mut self,
         py: Python<'_>,
-        key: &[u8],
+        key: &Bound<'_, PyAny>,
         value: &[u8],
         request_flags: Option<&RequestFlags>,
     ) -> PyResult<Py<PyAny>> {
-        let cmd = self
-            .build_cmd(b"ms", key, Some(value.len() as u32), request_flags)
-            .ok_or_else(|| PyValueError::new_err("Key is too long or empty"))?;
+        let cmd = self.build_cmd(b"ms", key, Some(value.len() as u32), request_flags)?;
         let io = &mut self.io;
         let result = py
             .detach(|| {
@@ -771,12 +762,10 @@ impl MemcacheSocket {
     pub fn meta_delete(
         &mut self,
         py: Python<'_>,
-        key: &[u8],
+        key: &Bound<'_, PyAny>,
         request_flags: Option<&RequestFlags>,
     ) -> PyResult<Py<PyAny>> {
-        let cmd = self
-            .build_cmd(b"md", key, None, request_flags)
-            .ok_or_else(|| PyValueError::new_err("Key is too long or empty"))?;
+        let cmd = self.build_cmd(b"md", key, None, request_flags)?;
         let io = &mut self.io;
         let result = py
             .detach(|| {
@@ -800,12 +789,10 @@ impl MemcacheSocket {
     pub fn meta_arithmetic(
         &mut self,
         py: Python<'_>,
-        key: &[u8],
+        key: &Bound<'_, PyAny>,
         request_flags: Option<&RequestFlags>,
     ) -> PyResult<Py<PyAny>> {
-        let cmd = self
-            .build_cmd(b"ma", key, None, request_flags)
-            .ok_or_else(|| PyValueError::new_err("Key is too long or empty"))?;
+        let cmd = self.build_cmd(b"ma", key, None, request_flags)?;
         let io = &mut self.io;
         let result = py
             .detach(|| {

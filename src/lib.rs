@@ -1,4 +1,5 @@
 mod constants;
+mod encode_key;
 mod impl_build_cmd;
 mod impl_build_cmd_tests;
 mod impl_parse_header;
@@ -18,8 +19,11 @@ pub use response_flags::ResponseFlags;
 use std::slice;
 
 use pyo3::buffer::PyBuffer;
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
+
+use encode_key::extract_key;
 
 #[pyfunction]
 #[pyo3(
@@ -55,26 +59,20 @@ pub fn parse_header(
         request_flags=None,
         legacy_size_format=false,
     ),
-    text_signature = "(cmd: bytes, key: bytes, size: Optional[int], request_flags: Optional[RequestFlags], legacy_size_format: bool = False)",
+    text_signature = "(cmd: bytes, key: Union[str, bytes], size: Optional[int], request_flags: Optional[RequestFlags], legacy_size_format: bool = False)",
 )]
 pub fn build_cmd<'py>(
     py: Python<'py>,
     cmd: &[u8],
-    key: &[u8],
+    key: &Bound<'py, PyAny>,
     size: Option<u32>,
     request_flags: Option<&RequestFlags>,
     legacy_size_format: bool,
 ) -> PyResult<Bound<'py, PyBytes>> {
-    match impl_build_cmd(
-        cmd,
-        key,
-        size,
-        request_flags,
-        legacy_size_format,
-        /* allow_no_reply_flag */ true,
-    ) {
+    let key = extract_key(key)?;
+    match impl_build_cmd(cmd, key, size, request_flags, legacy_size_format, true) {
         Some(built) => Ok(PyBytes::new(py, &built.buf)),
-        None => Err(pyo3::exceptions::PyValueError::new_err("Key is too long")),
+        None => Err(PyValueError::new_err("Key is empty")),
     }
 }
 
@@ -84,23 +82,17 @@ pub fn build_cmd<'py>(
         key,
         request_flags=None,
     ),
-    text_signature = "(key: bytes, request_flags: Optional[RequestFlags])",
+    text_signature = "(key: Union[str, bytes], request_flags: Optional[RequestFlags])",
 )]
 pub fn build_meta_get<'py>(
     py: Python<'py>,
-    key: &[u8],
+    key: &Bound<'py, PyAny>,
     request_flags: Option<&RequestFlags>,
 ) -> PyResult<Bound<'py, PyBytes>> {
-    match impl_build_cmd(
-        b"mg",
-        key,
-        None,
-        request_flags,
-        /* legacy_size_format */ false,
-        /* allow_no_reply_flag */ true,
-    ) {
+    let key = extract_key(key)?;
+    match impl_build_cmd(b"mg", key, None, request_flags, false, true) {
         Some(built) => Ok(PyBytes::new(py, &built.buf)),
-        None => Err(pyo3::exceptions::PyValueError::new_err("Key is too long")),
+        None => Err(PyValueError::new_err("Key is empty")),
     }
 }
 
@@ -112,25 +104,26 @@ pub fn build_meta_get<'py>(
         request_flags=None,
         legacy_size_format=false,
     ),
-    text_signature = "(key: bytes, size: int, request_flags: Optional[RequestFlags], legacy_size_format: bool = False)",
+    text_signature = "(key: Union[str, bytes], size: int, request_flags: Optional[RequestFlags], legacy_size_format: bool = False)",
 )]
 pub fn build_meta_set<'py>(
     py: Python<'py>,
-    key: &[u8],
+    key: &Bound<'py, PyAny>,
     size: u32,
     request_flags: Option<&RequestFlags>,
     legacy_size_format: bool,
 ) -> PyResult<Bound<'py, PyBytes>> {
+    let key = extract_key(key)?;
     match impl_build_cmd(
         b"ms",
         key,
         Some(size),
         request_flags,
         legacy_size_format,
-        /* allow_no_reply_flag */ true,
+        true,
     ) {
         Some(built) => Ok(PyBytes::new(py, &built.buf)),
-        None => Err(pyo3::exceptions::PyValueError::new_err("Key is too long")),
+        None => Err(PyValueError::new_err("Key is empty")),
     }
 }
 
@@ -140,23 +133,17 @@ pub fn build_meta_set<'py>(
         key,
         request_flags=None,
     ),
-    text_signature = "(key: bytes, request_flags: Optional[RequestFlags])",
+    text_signature = "(key: Union[str, bytes], request_flags: Optional[RequestFlags])",
 )]
 pub fn build_meta_delete<'py>(
     py: Python<'py>,
-    key: &[u8],
+    key: &Bound<'py, PyAny>,
     request_flags: Option<&RequestFlags>,
 ) -> PyResult<Bound<'py, PyBytes>> {
-    match impl_build_cmd(
-        b"md",
-        key,
-        None,
-        request_flags,
-        /* legacy_size_format */ false,
-        /* allow_no_reply_flag */ true,
-    ) {
+    let key = extract_key(key)?;
+    match impl_build_cmd(b"md", key, None, request_flags, false, true) {
         Some(built) => Ok(PyBytes::new(py, &built.buf)),
-        None => Err(pyo3::exceptions::PyValueError::new_err("Key is too long")),
+        None => Err(PyValueError::new_err("Key is empty")),
     }
 }
 
@@ -166,23 +153,17 @@ pub fn build_meta_delete<'py>(
         key,
         request_flags=None,
     ),
-    text_signature = "(key: bytes, request_flags: Optional[RequestFlags])",
+    text_signature = "(key: Union[str, bytes], request_flags: Optional[RequestFlags])",
 )]
 pub fn build_meta_arithmetic<'py>(
     py: Python<'py>,
-    key: &[u8],
+    key: &Bound<'py, PyAny>,
     request_flags: Option<&RequestFlags>,
 ) -> PyResult<Bound<'py, PyBytes>> {
-    match impl_build_cmd(
-        b"ma",
-        key,
-        None,
-        request_flags,
-        /* legacy_size_format */ false,
-        /* allow_no_reply_flag */ true,
-    ) {
+    let key = extract_key(key)?;
+    match impl_build_cmd(b"ma", key, None, request_flags, false, true) {
         Some(built) => Ok(PyBytes::new(py, &built.buf)),
-        None => Err(pyo3::exceptions::PyValueError::new_err("Key is too long")),
+        None => Err(PyValueError::new_err("Key is empty")),
     }
 }
 

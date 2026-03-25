@@ -146,38 +146,45 @@ mod tests {
     }
 
     #[test]
-    fn test_key_at_max_length() {
-        // 249 bytes is OK (< 250)
-        let key = &vec![b'X'; 249];
-        assert!(impl_build_cmd(b"mg", key, None, None, false, true).is_some());
+    fn test_short_key_passthrough() {
+        // 186 bytes is OK (< 187 = MAX_KEY_SIZE), passed through as-is
+        let key = &vec![b'X'; 186];
+        let built = impl_build_cmd(b"mg", key, None, None, false, true).unwrap();
+        // Key should appear directly in the command (not hashed)
+        assert!(built.buf.windows(186).any(|w| w == key.as_slice()));
     }
 
     #[test]
-    fn test_key_at_exact_max_length() {
-        // 250 bytes is rejected (>= MAX_KEY_LEN)
+    fn test_long_key_gets_hashed() {
+        // 250 bytes is >= MAX_KEY_SIZE, so it gets blake2b-hashed
         let key = &vec![b'X'; 250];
-        assert!(impl_build_cmd(b"mg", key, None, None, false, true).is_none());
+        let built = impl_build_cmd(b"mg", key, None, None, false, true).unwrap();
+        // The hashed key is binary -> base64-encoded, so the b flag should be present
+        assert!(built.buf.windows(2).any(|w| w == b" b"));
     }
 
     #[test]
-    fn test_binary_key_at_max_length() {
-        // 186 binary bytes is OK (< 187 = MAX_BIN_KEY_LEN)
+    fn test_binary_key_at_max_size() {
+        // 186 binary bytes is < MAX_KEY_SIZE, base64-encoded on the wire
         let key = &vec![0x00u8; 186];
-        assert!(impl_build_cmd(b"mg", key, None, None, false, true).is_some());
+        let built = impl_build_cmd(b"mg", key, None, None, false, true).unwrap();
+        assert!(built.buf.windows(2).any(|w| w == b" b"));
     }
 
     #[test]
-    fn test_binary_key_at_exact_max_length() {
-        // 187 binary bytes is rejected (>= MAX_BIN_KEY_LEN)
+    fn test_long_binary_key_gets_hashed() {
+        // 187 binary bytes is >= MAX_KEY_SIZE, gets hashed then base64-encoded
         let key = &vec![0x00u8; 187];
-        assert!(impl_build_cmd(b"mg", key, None, None, false, true).is_none());
+        let built = impl_build_cmd(b"mg", key, None, None, false, true).unwrap();
+        assert!(built.buf.windows(2).any(|w| w == b" b"));
     }
 
     #[test]
-    fn test_impl_build_cmd_large_key() {
-        let cmd = b"mg";
-        let key = &vec![b'X'; 250];
-        assert!(impl_build_cmd(cmd, key, None, None, false, true).is_none());
+    fn test_very_large_key_gets_hashed() {
+        let key = &vec![b'X'; 10_000];
+        let built = impl_build_cmd(b"mg", key, None, None, false, true).unwrap();
+        // Should succeed (hashed to 18 bytes -> base64 24 chars)
+        assert!(built.buf.len() < 100);
     }
 
     #[test]

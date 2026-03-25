@@ -1,6 +1,6 @@
 [package]
 name = "meta-memcache-socket"
-version = "0.2.0-alpha.1"
+version = "0.2.0-beta.1"
 edition = "2024"
 
 [lib]
@@ -10,6 +10,7 @@ crate-type = ["cdylib"]
 [dependencies]
 atoi = "2.0.0"
 base64 = "0.22.1"
+blake2 = "0.10"
 itoa = "1"
 libc = "0.2"
 memchr = "2"
