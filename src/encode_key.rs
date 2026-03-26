@@ -3,6 +3,7 @@ use blake2::Blake2bVar;
 use blake2::digest::{Update, VariableOutput};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3::types::{PyBytes, PyString};
 
 /// Max raw key size before hashing. Binary keys get base64-encoded (4/3 expansion),
 /// so the threshold is 250 * 3 / 4 ≈ 187.
@@ -59,10 +60,12 @@ pub fn encode_key(data: &[u8]) -> Option<EncodedKey> {
 
 /// Extract a key from a Python object. Accepts str (UTF-8) or bytes.
 pub fn extract_key<'py>(ob: &'py Bound<'py, PyAny>) -> PyResult<&'py [u8]> {
-    if let Ok(s) = ob.extract::<&str>() {
-        Ok(s.as_bytes())
-    } else if let Ok(b) = ob.extract::<&[u8]>() {
-        Ok(b)
+    // Use `cast` instead of `extract` — turning `PyDowncastError` into `PyErr` is costly,
+    // and we only care about the success path here.
+    if let Ok(s) = ob.cast::<PyString>() {
+        Ok(s.to_str()?.as_bytes())
+    } else if let Ok(b) = ob.cast::<PyBytes>() {
+        Ok(b.as_bytes())
     } else {
         Err(PyValueError::new_err("key must be str or bytes"))
     }
