@@ -489,10 +489,8 @@ impl MemcacheSocket {
                     Some(ValueData::Allocated(data)) => PyBytes::new(py, &data),
                     None => PyBytes::new(py, b""),
                 };
-                into_py(
-                    py,
-                    Value::new(size, flags, Some(py_bytes.into_any().unbind())),
-                )
+                Py::new(py, Value::new(size, flags, Some(py_bytes.into_any().unbind())))
+                    .map(|obj| obj.into_any())
             }
             Some(RESPONSE_SUCCESS) => {
                 let flags = header

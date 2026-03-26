@@ -1,4 +1,5 @@
 use pyo3::prelude::*;
+use pyo3::pyclass_init::PyClassInitializer;
 
 use crate::response_flags::ResponseFlags;
 
@@ -62,7 +63,7 @@ impl Conflict {
     }
 }
 
-#[pyclass(frozen, skip_from_py_object)]
+#[pyclass(subclass, skip_from_py_object)]
 #[derive(Clone, Debug)]
 pub struct Success {
     #[pyo3(get)]
@@ -81,12 +82,10 @@ impl Success {
     }
 }
 
-#[pyclass(skip_from_py_object)]
+#[pyclass(extends=Success, skip_from_py_object)]
 pub struct Value {
     #[pyo3(get)]
     pub size: u32,
-    #[pyo3(get)]
-    pub flags: ResponseFlags,
     #[pyo3(get, set)]
     pub value: Option<Py<PyAny>>,
 }
@@ -94,16 +93,17 @@ pub struct Value {
 #[pymethods]
 impl Value {
     #[new]
-    pub fn new(size: u32, flags: ResponseFlags, value: Option<Py<PyAny>>) -> Self {
-        Value { size, flags, value }
+    pub fn new(size: u32, flags: ResponseFlags, value: Option<Py<PyAny>>) -> PyClassInitializer<Self> {
+        PyClassInitializer::from(Success::new(flags)).add_subclass(Value { size, value })
     }
 
-    pub fn __repr__(&self) -> String {
+    pub fn __repr__(slf: PyRef<'_, Self>) -> String {
+        let super_ = slf.as_super();
         format!(
             "Value(size={}, flags={}, value={:?})",
-            self.size,
-            self.flags.__str__(),
-            self.value.as_ref().map(|_| "..."),
+            slf.size,
+            super_.flags.__str__(),
+            slf.value.as_ref().map(|_| "..."),
         )
     }
 }

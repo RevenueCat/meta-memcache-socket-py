@@ -118,7 +118,16 @@ class TestValue:
         assert isinstance(ns, NotStored)
         assert isinstance(c, Conflict)
 
-        # Value is NOT a subclass of Success in Rust version
-        assert not isinstance(v, Success)
+        # Check what is Success
+        # Value is a subclass of Success
+        assert isinstance(v, Success)
+        # Miss, NotStored, Conflict are not Success
+        assert not isinstance(m, Success)
+        assert not isinstance(ns, Success)
+        assert not isinstance(c, Success)
+
+        # Check only Value is Value
         assert not isinstance(s, Value)
         assert not isinstance(m, Value)
+        assert not isinstance(ns, Value)
+        assert not isinstance(c, Value)

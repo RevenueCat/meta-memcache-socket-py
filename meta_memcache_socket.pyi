@@ -271,9 +271,8 @@ class Success:
     def __init__(self, flags: ResponseFlags) -> None: ...
     def __repr__(self) -> str: ...
 
-class Value:
+class Value(Success):
     size: int
-    flags: ResponseFlags
     value: Any
 
     def __init__(
