@@ -1237,6 +1237,87 @@ class TestStringKeys:
         assert data == b"ms " + expected_b64 + b" 3 b\r\nval\r\n"
 
 
+# --- raw_cmd ---
+
+
+class TestRawCmd:
+    def test_single_line_version(self, socket_pair):
+        """Typical single-line command like 'version'."""
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        b.sendall(b"VERSION 1.6.22\r\n")
+        result = ms.raw_cmd(b"version")
+        assert result == b"VERSION 1.6.22"
+        # Verify \r\n was appended
+        data = b.recv(1024)
+        assert data == b"version\r\n"
+
+    def test_single_line_already_has_endl(self, socket_pair):
+        """Command already ending with \\r\\n should not get doubled."""
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        b.sendall(b"OK\r\n")
+        result = ms.raw_cmd(b"flush_all\r\n")
+        assert result == b"OK"
+        data = b.recv(1024)
+        assert data == b"flush_all\r\n"
+
+    def test_multi_line_stats(self, socket_pair):
+        """Multi-line response like 'stats'."""
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        b.sendall(
+            b"STAT pid 12345\r\n"
+            b"STAT uptime 1000\r\n"
+            b"STAT version 1.6.22\r\n"
+            b"END\r\n"
+        )
+        result = ms.raw_cmd(b"stats", multi_line=True)
+        assert result == (
+            b"STAT pid 12345\r\n"
+            b"STAT uptime 1000\r\n"
+            b"STAT version 1.6.22\r\n"
+        )
+
+    def test_multi_line_empty(self, socket_pair):
+        """Multi-line response with no content before END."""
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        b.sendall(b"END\r\n")
+        result = ms.raw_cmd(b"stats slabs", multi_line=True)
+        assert result == b""
+
+    def test_single_line_empty_response(self, socket_pair):
+        """Server returns just \\r\\n."""
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        b.sendall(b"\r\n")
+        result = ms.raw_cmd(b"test")
+        assert result == b""
+
+    def test_nonblocking_socket(self, socket_pair):
+        a, b = socket_pair
+        a.settimeout(5.0)
+        ms = MemcacheSocket(a)
+        b.sendall(b"VERSION 1.6.22\r\n")
+        result = ms.raw_cmd(b"version")
+        assert result == b"VERSION 1.6.22"
+
+    def test_does_not_affect_main_buffer(self, socket_pair):
+        """raw_cmd should not disturb main I/O state for subsequent meta commands."""
+        a, b = socket_pair
+        ms = MemcacheSocket(a)
+        # raw command
+        b.sendall(b"VERSION 1.6.22\r\n")
+        ms.raw_cmd(b"version")
+        # meta get should still work
+        b.sendall(b"VA 3 c1\r\nfoo\r\n")
+        resp = ms.meta_get(b"mykey", RequestFlags(return_cas_token=True))
+        assert isinstance(resp, Value)
+        assert resp.value == b"foo"
+        assert resp.flags.cas_token == 1
+
+
 class TestVersionConstants:
     def test_constants_values(self):
         assert SERVER_VERSION_AWS_1_6_6 == 1
