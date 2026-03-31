@@ -1,5 +1,5 @@
 import socket
-from typing import Any, Optional, Tuple, Union
+from typing import Any, Final, Optional, Tuple, Union
 
 RESPONSE_VALUE: int  # 1 - VALUE (VA)
 RESPONSE_SUCCESS: int  # 2 - SUCCESS (OK or HD)
@@ -56,26 +56,26 @@ class RequestFlags:
     * mode: The mode to use when storing the value in the cache. See SET_MODE_* and MA_MODE_* constants
     """
 
-    no_reply: bool
-    return_client_flag: bool
-    return_cas_token: bool
-    return_value: bool
-    return_ttl: bool
-    return_size: bool
-    return_last_access: bool
-    return_fetched: bool
-    return_key: bool
-    no_update_lru: bool
-    mark_stale: bool
-    cache_ttl: Optional[int]
-    recache_ttl: Optional[int]
-    vivify_on_miss_ttl: Optional[int]
-    client_flag: Optional[int]
-    ma_initial_value: Optional[int]
-    ma_delta_value: Optional[int]
-    cas_token: Optional[int]
-    opaque: Optional[bytes]
-    mode: Optional[int]
+    no_reply: Final[bool]
+    return_client_flag: Final[bool]
+    return_cas_token: Final[bool]
+    return_value: Final[bool]
+    return_ttl: Final[bool]
+    return_size: Final[bool]
+    return_last_access: Final[bool]
+    return_fetched: Final[bool]
+    return_key: Final[bool]
+    no_update_lru: Final[bool]
+    mark_stale: Final[bool]
+    cache_ttl: Final[Optional[int]]
+    recache_ttl: Final[Optional[int]]
+    vivify_on_miss_ttl: Final[Optional[int]]
+    client_flag: Final[Optional[int]]
+    ma_initial_value: Final[Optional[int]]
+    ma_delta_value: Final[Optional[int]]
+    cas_token: Final[Optional[int]]
+    opaque: Final[Optional[bytes]]
+    mode: Final[Optional[int]]
 
     def __init__(
         self,
@@ -101,7 +101,30 @@ class RequestFlags:
         opaque: Optional[bytes] = None,
         mode: Optional[int] = None,
     ) -> None: ...
-    def copy(self) -> "RequestFlags": ...
+    def replace(
+        self,
+        *,
+        no_reply: Optional[bool] = None,
+        return_client_flag: Optional[bool] = None,
+        return_cas_token: Optional[bool] = None,
+        return_value: Optional[bool] = None,
+        return_ttl: Optional[bool] = None,
+        return_size: Optional[bool] = None,
+        return_last_access: Optional[bool] = None,
+        return_fetched: Optional[bool] = None,
+        return_key: Optional[bool] = None,
+        no_update_lru: Optional[bool] = None,
+        mark_stale: Optional[bool] = None,
+        cache_ttl: Optional[int] = None,
+        recache_ttl: Optional[int] = None,
+        vivify_on_miss_ttl: Optional[int] = None,
+        client_flag: Optional[int] = None,
+        ma_initial_value: Optional[int] = None,
+        ma_delta_value: Optional[int] = None,
+        cas_token: Optional[int] = None,
+        opaque: Optional[bytes] = None,
+        mode: Optional[int] = None,
+    ) -> "RequestFlags": ...
     def to_bytes(self) -> bytes: ...
     def __str__(self) -> str: ...
 

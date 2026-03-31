@@ -559,4 +559,171 @@ mod tests {
             b" q f c v t s l h k u I T1 R2 N3 F4 J5 D6 C7 Oop ME"
         );
     }
+
+    // Helper: all-None replace call (no overrides)
+    fn replace_none(flags: &RequestFlags) -> RequestFlags {
+        flags.replace(
+            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            None, None, None, None, None, None,
+        )
+    }
+
+    #[test]
+    fn test_replace_no_args_returns_equal() {
+        let base = RequestFlags::new(
+            true,
+            true,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            Some(300),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        assert_eq!(replace_none(&base), base);
+    }
+
+    #[test]
+    fn test_replace_bool_flag() {
+        let base = default_flags();
+        let updated = base.replace(
+            Some(true), // no_reply
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        assert_eq!(push_to_vec(&updated), b" q");
+        // base is unchanged
+        assert_eq!(push_to_vec(&base), b"");
+    }
+
+    #[test]
+    fn test_replace_optional_field() {
+        let base = default_flags();
+        let updated = base.replace(
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(600), // cache_ttl
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        assert_eq!(push_to_vec(&updated), b" T600");
+        assert_eq!(push_to_vec(&base), b"");
+    }
+
+    #[test]
+    fn test_replace_none_keeps_existing_optional() {
+        // Passing None for an optional field keeps the existing value, not unsets it
+        let base = RequestFlags::new(
+            false, false, false, false, false, false, false, false, false, false, false,
+            Some(300), // cache_ttl set
+            None, None, None, None, None, None, None, None,
+        );
+        let updated = replace_none(&base);
+        assert_eq!(push_to_vec(&updated), b" T300");
+    }
+
+    #[test]
+    fn test_replace_multiple_fields() {
+        let base = RequestFlags::new(
+            false, true, false, true, false, false, false, false, false, false, false, Some(60),
+            None, None, None, None, None, None, None, None,
+        );
+        let updated = base.replace(
+            Some(true), // add no_reply
+            None,       // keep return_client_flag=true
+            Some(true), // add return_cas_token
+            None,       // keep return_value=true
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,       // keep cache_ttl=60
+            Some(120),  // add recache_ttl
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        assert_eq!(push_to_vec(&updated), b" q f c v T60 R120");
+    }
+
+    #[test]
+    fn test_replace_opaque() {
+        let base = default_flags();
+        let updated = base.replace(
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(b"abc".to_vec()),
+            None,
+        );
+        assert_eq!(push_to_vec(&updated), b" Oabc");
+        // base is unchanged
+        assert_eq!(push_to_vec(&base), b"");
+    }
 }
