@@ -3,48 +3,48 @@ use pyo3::types::PyBytes;
 
 use crate::{MA_MODE_INC, SET_MODE_SET};
 
-#[pyclass(eq, skip_from_py_object)]
+#[pyclass(eq, skip_from_py_object, frozen)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct RequestFlags {
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     no_reply: bool,
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     return_client_flag: bool,
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     return_cas_token: bool,
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     return_value: bool,
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     return_ttl: bool,
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     return_size: bool,
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     return_last_access: bool,
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     return_fetched: bool,
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     return_key: bool,
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     no_update_lru: bool,
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     mark_stale: bool,
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     cache_ttl: Option<u32>,
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     recache_ttl: Option<u32>,
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     vivify_on_miss_ttl: Option<u32>,
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     client_flag: Option<u32>,
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     ma_initial_value: Option<u64>,
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     ma_delta_value: Option<u64>,
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     cas_token: Option<u32>,
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     opaque: Option<Vec<u8>>,
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     mode: Option<u8>,
 }
 
@@ -251,8 +251,86 @@ impl RequestFlags {
         }
     }
 
-    pub fn copy(&self) -> Self {
-        self.clone()
+    /// Return a copy of this object with the specified fields replaced.
+    ///
+    /// Only keyword arguments that are explicitly provided (non-None) override the
+    /// corresponding field. Fields not mentioned keep their current value.
+    ///
+    /// Note: passing `None` explicitly for an optional field (e.g. `cache_ttl=None`)
+    /// keeps the existing value rather than unsetting it. To unset an optional field,
+    /// construct a new `RequestFlags` directly.
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(
+        signature = (
+            /,
+            *,
+            no_reply=None,
+            return_client_flag=None,
+            return_cas_token=None,
+            return_value=None,
+            return_ttl=None,
+            return_size=None,
+            return_last_access=None,
+            return_fetched=None,
+            return_key=None,
+            no_update_lru=None,
+            mark_stale=None,
+            cache_ttl=None,
+            recache_ttl=None,
+            vivify_on_miss_ttl=None,
+            client_flag=None,
+            ma_initial_value=None,
+            ma_delta_value=None,
+            cas_token=None,
+            opaque=None,
+            mode=None
+        )
+    )]
+    pub fn replace(
+        &self,
+        no_reply: Option<bool>,
+        return_client_flag: Option<bool>,
+        return_cas_token: Option<bool>,
+        return_value: Option<bool>,
+        return_ttl: Option<bool>,
+        return_size: Option<bool>,
+        return_last_access: Option<bool>,
+        return_fetched: Option<bool>,
+        return_key: Option<bool>,
+        no_update_lru: Option<bool>,
+        mark_stale: Option<bool>,
+        cache_ttl: Option<u32>,
+        recache_ttl: Option<u32>,
+        vivify_on_miss_ttl: Option<u32>,
+        client_flag: Option<u32>,
+        ma_initial_value: Option<u64>,
+        ma_delta_value: Option<u64>,
+        cas_token: Option<u32>,
+        opaque: Option<Vec<u8>>,
+        mode: Option<u8>,
+    ) -> Self {
+        RequestFlags {
+            no_reply: no_reply.unwrap_or(self.no_reply),
+            return_client_flag: return_client_flag.unwrap_or(self.return_client_flag),
+            return_cas_token: return_cas_token.unwrap_or(self.return_cas_token),
+            return_value: return_value.unwrap_or(self.return_value),
+            return_ttl: return_ttl.unwrap_or(self.return_ttl),
+            return_size: return_size.unwrap_or(self.return_size),
+            return_last_access: return_last_access.unwrap_or(self.return_last_access),
+            return_fetched: return_fetched.unwrap_or(self.return_fetched),
+            return_key: return_key.unwrap_or(self.return_key),
+            no_update_lru: no_update_lru.unwrap_or(self.no_update_lru),
+            mark_stale: mark_stale.unwrap_or(self.mark_stale),
+            cache_ttl: cache_ttl.or(self.cache_ttl),
+            recache_ttl: recache_ttl.or(self.recache_ttl),
+            vivify_on_miss_ttl: vivify_on_miss_ttl.or(self.vivify_on_miss_ttl),
+            client_flag: client_flag.or(self.client_flag),
+            ma_initial_value: ma_initial_value.or(self.ma_initial_value),
+            ma_delta_value: ma_delta_value.or(self.ma_delta_value),
+            cas_token: cas_token.or(self.cas_token),
+            opaque: opaque.or_else(|| self.opaque.clone()),
+            mode: mode.or(self.mode),
+        }
     }
 
     pub fn __str__(&self) -> String {

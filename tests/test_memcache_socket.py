@@ -1011,3 +1011,52 @@ class TestVersionConstants:
         """ServerVersion IntEnum values match Rust constants."""
         assert SERVER_VERSION_AWS_1_6_6 == 1
         assert SERVER_VERSION_STABLE == 2
+
+
+class TestRequestFlagsReplace:
+    def test_replace_no_args_returns_equal(self):
+        base = RequestFlags(return_value=True, cache_ttl=300)
+        assert base.replace() == base
+
+    def test_replace_bool_flag(self):
+        base = RequestFlags(return_value=True)
+        updated = base.replace(return_cas_token=True)
+        assert updated.return_value is True
+        assert updated.return_cas_token is True
+        # base is unchanged
+        assert base.return_cas_token is False
+
+    def test_replace_optional_field(self):
+        base = RequestFlags(return_value=True)
+        updated = base.replace(cache_ttl=600)
+        assert updated.cache_ttl == 600
+        assert updated.return_value is True
+        # base is unchanged
+        assert base.cache_ttl is None
+
+    def test_replace_none_keeps_existing_optional(self):
+        base = RequestFlags(cache_ttl=300)
+        # explicitly passing None keeps the existing value, not unsets it
+        updated = base.replace(cache_ttl=None)
+        assert updated.cache_ttl == 300
+
+    def test_replace_multiple_fields(self):
+        base = RequestFlags(return_client_flag=True, return_value=True, cache_ttl=60)
+        updated = base.replace(no_reply=True, return_cas_token=True, recache_ttl=120)
+        assert updated.no_reply is True
+        assert updated.return_client_flag is True   # preserved
+        assert updated.return_cas_token is True
+        assert updated.return_value is True          # preserved
+        assert updated.cache_ttl == 60              # preserved
+        assert updated.recache_ttl == 120
+
+    def test_replace_opaque(self):
+        base = RequestFlags(return_value=True)
+        updated = base.replace(opaque=b"abc")
+        assert updated.opaque == b"abc"
+        assert base.opaque is None
+
+    def test_fields_are_readonly(self):
+        flags = RequestFlags(return_value=True)
+        with pytest.raises(AttributeError):
+            flags.return_value = False  # type: ignore[misc]
