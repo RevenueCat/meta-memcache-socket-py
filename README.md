@@ -29,7 +29,7 @@ meta-memcache-socket-py/
 │   ├── lib.rs                      # PyO3 module entry — exports classes, functions, constants
 │   ├── constants.rs                # Protocol constants (response codes, set modes, NOOP, ENDL)
 │   ├── memcache_socket.rs          # MemcacheSocket class — socket I/O, buffering, GIL management
-│   ├── request_flags.rs            # RequestFlags class — mutable flags for building commands
+│   ├── request_flags.rs            # RequestFlags class — immutable flags for building commands
 │   ├── response_flags.rs           # ResponseFlags class — immutable flags parsed from responses
 │   ├── response_types.rs           # Response type classes (Value, Success, Miss, NotStored, Conflict)
 │   ├── impl_build_cmd.rs           # Command builder — key validation, base64, flag encoding
@@ -175,7 +175,7 @@ flags.opaque        # Optional[bytes] — echoed opaque data (O)
 
 ### RequestFlags
 
-Mutable container for flags sent with commands.
+Immutable container for flags sent with commands.
 
 ```python
 from meta_memcache_socket import RequestFlags
@@ -205,10 +205,27 @@ flags = RequestFlags(
     opaque=None,              # O — opaque data echoed back
     mode=None,                # M — operation mode (set/arithmetic)
 )
+```
 
-flags.copy()       # -> RequestFlags (deep copy)
+The flags are immutable, so they can be reused safely across threads when
+calling meta commands. Internal layers migth need to mutate flags
+(content id, reduce ttl, etc...) and will mutate them use replace() to create
+modified copies when needed.
+
+If you need to change flags on a existing RequestFlags, use the `replace()` method:
+
+```python
+new_flags = flags.replace(return_ttl=True, cache_ttl=600)  # -> RequestFlags
+```
+
+You can also encode the flags into a byte string for command building, showing
+exactly what will be sent on the wire:
+
+```python
 flags.to_bytes()   # -> bytes (encoded flag string)
 ```
+
+For debugging purposes, stringifying it shows the flags in a human-readable format.
 
 ### Command builders
 
