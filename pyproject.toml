@@ -15,6 +15,12 @@ dynamic = ["version"]
 [tool.maturin]
 features = ["pyo3/extension-module"]
 
+[tool.maturin.generate-ci.github.linux]
+
+[tool.maturin.generate-ci.github.musllinux]
+
+[tool.maturin.generate-ci.github.macos]
+
 [tool.uv]
 cache-keys = [
   { file = "pyproject.toml" },
